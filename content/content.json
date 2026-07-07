@@ -1,0 +1,44 @@
+{
+  "site": {
+    "title": "Saad Bhatti's Studio",
+    "intro": "Howdy, I'm Saad Bhatti, and welcome to my studio. Feel free to explore my work.",
+    "bio": [
+      "I'm Saad Bhatti, a Software Engineer by trade, but a creative at heart.",
+      "I've been shooting film for a few years on my film cameras, and have expanded my creative endeavors to oil painting."
+    ],
+    "contact": {
+      "instagram": "https://instagram.com/sbhphotographyaccount/"
+    },
+    "heroImage": "meta/hero",
+    "headshotImage": "meta/headshot"
+  },
+  "mediums": [
+    {
+      "slug": "photography",
+      "displayName": "photography",
+      "status": "published",
+      "collections": [
+        {
+          "slug": "pakistan2023",
+          "name": "pakistan2023",
+          "cover": null,
+          "artworks": [
+            {
+              "type": "photograph",
+              "slug": "photo-01",
+              "name": "Untitled",
+              "image": "photography/pakistan2023/photo-01",
+              "film": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "oil-paintings",
+      "displayName": "oil paintings",
+      "status": "wip",
+      "collections": []
+    }
+  ]
+}

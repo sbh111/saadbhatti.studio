@@ -1,0 +1,33 @@
+@import "tailwindcss";
+
+@theme {
+  --color-page: #e9ebee;
+  --color-panel: #dfe2e6;
+  --color-ink: #262a2e;
+  --color-ink-muted: #6c727a;
+  --color-ink-faint: #9aa0a7;
+  --color-hairline: #cfd3d8;
+  --color-steel: #445059;
+  --color-nav-active: #d2d7dc;
+  --color-placeholder: #c7cbd0;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  /* Sidebar becomes persistent at the desktop breakpoint (spec §3.3) */
+  --breakpoint-desk: 900px;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+}
+
+/* Anchor targets scroll clear of the scroll container edge */
+[id] {
+  scroll-margin-top: 16px;
+}
