@@ -1,4 +1,4 @@
-const CLOUD_NAME = "sbh111";
+export const CLOUD_NAME = "sbh111";
 const BASE = `https://res.cloudinary.com/${CLOUD_NAME}/image/upload`;
 
 /** Display cap: long edge 2048px (originals stay off-site) */

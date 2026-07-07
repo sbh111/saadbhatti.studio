@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { countLabel, coverImage, type Collection } from "@/lib/content";
+import { countLabel, type CatalogCollection } from "@/lib/catalog";
 import ArtworkImage from "./ArtworkImage";
 
 /**
@@ -12,20 +12,22 @@ export default function CollectionCover({
   mediumSlug,
   priority = false,
 }: {
-  collection: Collection;
+  collection: CatalogCollection;
   mediumSlug: string;
   priority?: boolean;
 }) {
-  const cover = coverImage(collection);
+  const coverAspect =
+    collection.artworks.find((a) => a.image === collection.cover)?.aspect ?? 1.5;
   return (
     <Link
       href={`/${mediumSlug}/${collection.slug}`}
       className="block px-2 pb-8"
     >
-      {cover && (
+      {collection.cover && (
         <ArtworkImage
-          src={cover}
+          src={collection.cover}
           alt={`${collection.name} — cover`}
+          aspect={coverAspect}
           priority={priority}
         />
       )}

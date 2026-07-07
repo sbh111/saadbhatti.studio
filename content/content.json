@@ -13,32 +13,7 @@
     "headshotImage": "/images/headshot.jpg"
   },
   "mediums": [
-    {
-      "slug": "photography",
-      "displayName": "photography",
-      "status": "published",
-      "collections": [
-        {
-          "slug": "pakistan2023",
-          "name": "pakistan2023",
-          "cover": null,
-          "artworks": [
-            {
-              "type": "photograph",
-              "slug": "photo-01",
-              "name": "Untitled",
-              "image": "photography/pakistan2023/photo-01",
-              "film": null
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "slug": "oil-paintings",
-      "displayName": "oil paintings",
-      "status": "wip",
-      "collections": []
-    }
+    { "slug": "photography", "displayName": "photography", "status": "published" },
+    { "slug": "oil-paintings", "displayName": "oil paintings", "status": "wip" }
   ]
 }

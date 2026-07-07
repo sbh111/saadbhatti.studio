@@ -140,10 +140,17 @@ Desktop (≥ ~900px)          Mobile (< ~900px)
 
 ---
 
-## 7. Content model — `content.json` (Pattern B)
+## 7. Content model — Cloudinary is the source of truth (Pattern A — REVISED)
 
-The manifest is the source of truth. `ArtWork` is a base shape; `type` discriminates the
-medium-specific fields (`photograph` vs `painting`). Optional fields simply don't render.
+> **Revision (post-launch):** originally built as Pattern B (JSON manifest). Switched to
+> Pattern A at Saad's request once Cloudinary **contextual metadata** proved sufficient:
+> folder membership = collection, `Title Name`/`Film`/`Medium`/`Dimensions`/`Year` context
+> keys = per-artwork data, alphabetical filename order (`01-`, `02-`, …) = display order.
+> Implemented in `lib/catalog.ts` via the Admin API (env vars `CLOUDINARY_API_KEY`/
+> `CLOUDINARY_API_SECRET`), with hourly ISR revalidation. `content.json` now holds only
+> site text + the medium list (slug, displayName, published/wip status).
+
+The original Pattern B manifest shape below is kept for historical reference:
 
 ```jsonc
 {

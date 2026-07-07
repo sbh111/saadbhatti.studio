@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { content, countLabel, getCollection } from "@/lib/content";
+import { content } from "@/lib/content";
+import { countLabel, getCatalog, getCatalogCollection } from "@/lib/catalog";
 import ArtworkBlock from "@/components/ArtworkBlock";
 
-export function generateStaticParams() {
-  return content.mediums.flatMap((m) =>
+export async function generateStaticParams() {
+  const catalog = await getCatalog();
+  return catalog.flatMap((m) =>
     m.collections.map((c) => ({ medium: m.slug, collection: c.slug }))
   );
 }
@@ -15,7 +17,7 @@ export async function generateMetadata({
   params: Promise<{ medium: string; collection: string }>;
 }): Promise<Metadata> {
   const { medium, collection } = await params;
-  const data = getCollection(medium, collection);
+  const data = await getCatalogCollection(medium, collection);
   return { title: `${data?.name ?? collection} — ${content.site.title}` };
 }
 
@@ -25,7 +27,7 @@ export default async function CollectionView({
   params: Promise<{ medium: string; collection: string }>;
 }) {
   const { medium, collection } = await params;
-  const data = getCollection(medium, collection);
+  const data = await getCatalogCollection(medium, collection);
   if (!data) notFound();
 
   const noun = medium === "photography" ? "film" : "oil";

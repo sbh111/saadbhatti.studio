@@ -16,31 +16,30 @@ npm run dev     # http://localhost:3000
 
 ## Adding / updating content
 
-All content is driven by [`content/content.json`](content/content.json) — no code changes
-needed to add work.
+**Cloudinary is the source of truth for artwork** — the site reads it at build time via the
+Admin API (see `lib/catalog.ts`). No code or JSON changes needed to add work:
 
 1. **Upload the image to Cloudinary** into the folder convention
-   `/<medium>/<collection>/`, e.g. `photography/pakistan2023/rooftops-lahore`.
-2. **Add an entry** to the collection's `artworks` array (array order = display order):
+   `/<medium>/<collection>/`, e.g. `photography/pakistan2023/01-rooftops`.
+2. **Set contextual metadata** on the image in the Media Library:
+   - `Title Name` — the display name (falls back to the built-in Title, then a
+     prettified filename)
+   - photographs: `Film` (e.g. `Portra 400`)
+   - paintings: `Medium`, `Dimensions`, `Year`
+   Blank/missing keys simply don't render.
+3. **Order** is alphabetical by filename — prefix files `01-`, `02-`, … to control it.
+4. The site re-checks Cloudinary hourly (ISR); redeploy on Vercel to see changes
+   immediately.
 
-   ```jsonc
-   // photograph
-   { "type": "photograph", "slug": "rooftops-lahore", "name": "Rooftops, Lahore",
-     "image": "photography/pakistan2023/rooftops-lahore", "film": "Portra 400" }
+A new collection = a new folder under the medium. New mediums (and the site text, bio,
+contact) live in [`content/content.json`](content/content.json). A medium with
+`"status": "wip"` renders the "Work in progress" view.
 
-   // painting
-   { "type": "painting", "slug": "first-oil", "name": "First Oil",
-     "image": "oil-paintings/collection/first-oil",
-     "medium": "Oil on Canvas", "dimensions": "24x36in", "year": "2026" }
-   ```
+### Cloudinary API credentials (required to build)
 
-   Optional fields (`film`, `medium`, `dimensions`, `year`, `aspect`) can be `null` or
-   omitted — blanks simply don't render. `aspect` (width ÷ height, e.g. `1.5`) reserves
-   the right space before the image loads; it defaults to 3:2.
-3. Commit + push — Vercel redeploys automatically.
-
-New collections go in a medium's `collections` array; a new medium goes in `mediums`.
-A medium with `"status": "wip"` (or no collections) renders the "Work in progress" view.
+The build calls the Cloudinary Admin API. Copy `.env.local.example` to `.env.local` and
+fill in the API key/secret from the Cloudinary dashboard (Settings → API Keys). Add the
+same two variables in Vercel: Project → Settings → Environment Variables.
 
 ### Hero & headshot — local files
 

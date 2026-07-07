@@ -14,7 +14,7 @@ export default function AboutMeView() {
           <ArtworkImage
             src={site.headshotImage}
             alt="Saad Bhatti"
-            aspect={300 / 380}
+            aspect={3 / 4}
             priority
             sizes="300px"
           />

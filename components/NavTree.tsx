@@ -3,56 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { content } from "@/lib/content";
+import type { NavNode } from "@/lib/nav";
 
-interface NavNode {
-  id: string;
-  label: string;
-  /** undefined → expand/collapse only (the "art" group) */
-  href?: string;
-  depth: number;
-  children: NavNode[];
-  nested?: boolean;
-}
-
-function buildTree(): NavNode[] {
-  const nodes: NavNode[] = [
-    { id: "/about", label: "about me", href: "/about", depth: 0, children: [] },
-  ];
-  const art: NavNode = { id: "art", label: "art", depth: 0, children: [] };
-  for (const medium of content.mediums) {
-    const mediumNode: NavNode = {
-      id: `/${medium.slug}`,
-      label: medium.displayName,
-      href: `/${medium.slug}`,
-      depth: 1,
-      children: [],
-    };
-    for (const collection of medium.collections) {
-      const base = `/${medium.slug}/${collection.slug}`;
-      const collectionNode: NavNode = {
-        id: base,
-        label: collection.name,
-        href: base,
-        depth: 2,
-        children: collection.artworks.map((a) => ({
-          id: `${base}#${a.slug}`,
-          label: a.name,
-          href: `${base}#${a.slug}`,
-          depth: 3,
-          children: [],
-          nested: true,
-        })),
-      };
-      mediumNode.children.push(collectionNode);
-    }
-    art.children.push(mediumNode);
-  }
-  nodes.push(art);
-  return nodes;
-}
-
-const TREE = buildTree();
 const INDENT = [14, 26, 38, 52];
 
 function ancestorsOf(pathname: string): string[] {
@@ -81,7 +33,13 @@ function Chevron({ open, active }: { open: boolean; active: boolean }) {
   );
 }
 
-export default function NavTree({ onNavigate }: { onNavigate?: () => void }) {
+export default function NavTree({
+  tree,
+  onNavigate,
+}: {
+  tree: NavNode[];
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(ancestorsOf(pathname))
@@ -176,7 +134,7 @@ export default function NavTree({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <nav aria-label="Site">
-      <ul>{TREE.map((node) => renderNode(node))}</ul>
+      <ul>{tree.map((node) => renderNode(node))}</ul>
     </nav>
   );
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { content, getMedium } from "@/lib/content";
+import { content } from "@/lib/content";
+import { getCatalogMedium } from "@/lib/catalog";
 import CollectionCover from "@/components/CollectionCover";
 import WIPView from "@/components/WIPView";
 
@@ -14,8 +15,8 @@ export async function generateMetadata({
   params: Promise<{ medium: string }>;
 }): Promise<Metadata> {
   const { medium } = await params;
-  const data = getMedium(medium);
-  return { title: `${data?.displayName ?? medium} — ${content.site.title}` };
+  const def = content.mediums.find((m) => m.slug === medium);
+  return { title: `${def?.displayName ?? medium} — ${content.site.title}` };
 }
 
 export default async function CollectionsView({
@@ -24,7 +25,7 @@ export default async function CollectionsView({
   params: Promise<{ medium: string }>;
 }) {
   const { medium } = await params;
-  const data = getMedium(medium);
+  const data = await getCatalogMedium(medium);
   if (!data) notFound();
 
   if (data.status === "wip" || data.collections.length === 0) {

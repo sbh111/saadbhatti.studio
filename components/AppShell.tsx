@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import type { NavNode } from "@/lib/nav";
 import NavTree from "./NavTree";
 
 function Wordmark({ onNavigate }: { onNavigate?: () => void }) {
@@ -16,19 +17,31 @@ function Wordmark({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarContent({
+  tree,
+  onNavigate,
+}: {
+  tree: NavNode[];
+  onNavigate?: () => void;
+}) {
   return (
     <div className="flex h-full flex-col overflow-y-auto pb-5 pt-6">
       <div className="px-3.5 pb-3.5">
         <Wordmark onNavigate={onNavigate} />
       </div>
       <div className="mx-3.5 mb-3 border-t border-hairline" />
-      <NavTree onNavigate={onNavigate} />
+      <NavTree tree={tree} onNavigate={onNavigate} />
     </div>
   );
 }
 
-export default function AppShell({ children }: { children: React.ReactNode }) {
+export default function AppShell({
+  tree,
+  children,
+}: {
+  tree: NavNode[];
+  children: React.ReactNode;
+}) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const closeDrawer = () => setDrawerOpen(false);
 
@@ -54,7 +67,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Desktop sidebar */}
       <aside className="hidden w-[220px] shrink-0 border-r border-hairline bg-panel desk:block">
-        <SidebarContent />
+        <SidebarContent tree={tree} />
       </aside>
 
       {/* Mobile drawer */}
@@ -67,7 +80,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onClick={closeDrawer}
           />
           <div className="absolute inset-y-0 left-0 w-[300px] max-w-[85vw] bg-panel shadow-xl transition-transform motion-reduce:transition-none">
-            <SidebarContent onNavigate={closeDrawer} />
+            <SidebarContent tree={tree} onNavigate={closeDrawer} />
           </div>
         </div>
       )}

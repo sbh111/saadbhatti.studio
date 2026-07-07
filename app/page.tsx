@@ -8,7 +8,7 @@ export default function LandingView() {
         <ArtworkImage
           src={content.site.heroImage}
           alt="Saad Bhatti in the studio"
-          aspect={1.56}
+          aspect={4 / 3}
           priority
           sizes="(min-width: 900px) 780px, calc(100vw - 40px)"
         />
