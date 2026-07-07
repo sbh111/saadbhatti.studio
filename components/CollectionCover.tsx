@@ -24,7 +24,7 @@ export default function CollectionCover({
     >
       {cover && (
         <ArtworkImage
-          publicId={cover}
+          src={cover}
           alt={`${collection.name} — cover`}
           priority={priority}
         />

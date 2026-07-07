@@ -9,8 +9,8 @@
     "contact": {
       "instagram": "https://instagram.com/sbhphotographyaccount/"
     },
-    "heroImage": "meta/hero",
-    "headshotImage": "meta/headshot"
+    "heroImage": "/images/hero.jpg",
+    "headshotImage": "/images/headshot.jpg"
   },
   "mediums": [
     {

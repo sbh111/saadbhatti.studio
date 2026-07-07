@@ -42,12 +42,23 @@ needed to add work.
 New collections go in a medium's `collections` array; a new medium goes in `mediums`.
 A medium with `"status": "wip"` (or no collections) renders the "Work in progress" view.
 
+### Hero & headshot — local files
+
+The landing hero and about-page headshot are served straight from the repo, not
+Cloudinary. Drop the files at:
+
+- `public/images/hero.jpg` — landing hero photo
+- `public/images/headshot.jpg` — about-page headshot
+
+(`content.json` points at `/images/hero.jpg` and `/images/headshot.jpg`; any image
+reference starting with `/` is treated as a local file under `public/`, everything
+else as a Cloudinary public id.)
+
 ### Images still to upload (placeholders until then)
 
-- `meta/hero` — landing hero photo
-- `meta/headshot` — about-page headshot
-- `photography/pakistan2023/photo-01` — first photo (then set its real `name`/`film`
-  in the manifest)
+- `public/images/hero.jpg` and `public/images/headshot.jpg` (local, see above)
+- `photography/pakistan2023/photo-01` — first photo on Cloudinary (then set its real
+  `name`/`film` in the manifest)
 
 Images are delivered capped at **2048px long edge** (`c_limit`) with `f_auto,q_auto`,
 responsive `srcset`, lazy loading, and a blur-up placeholder. Originals stay off-site.

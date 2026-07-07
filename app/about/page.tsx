@@ -12,7 +12,7 @@ export default function AboutMeView() {
       <div className="mt-8 flex flex-col gap-8 desk:flex-row desk:gap-11">
         <div className="w-full max-w-[300px] shrink-0">
           <ArtworkImage
-            publicId={site.headshotImage}
+            src={site.headshotImage}
             alt="Saad Bhatti"
             aspect={300 / 380}
             priority

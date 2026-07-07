@@ -6,7 +6,7 @@ export default function LandingView() {
     <div className="flex min-h-full flex-col items-center justify-center gap-8 px-5 py-12 desk:px-20">
       <div className="w-full max-w-[780px]">
         <ArtworkImage
-          publicId={content.site.heroImage}
+          src={content.site.heroImage}
           alt="Saad Bhatti in the studio"
           aspect={1.56}
           priority

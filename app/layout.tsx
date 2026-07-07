@@ -19,7 +19,11 @@ export const metadata: Metadata = {
   openGraph: {
     title: content.site.title,
     description: content.site.intro,
-    images: [imageUrl(content.site.heroImage, 1200)],
+    images: [
+      content.site.heroImage.startsWith("/")
+        ? content.site.heroImage
+        : imageUrl(content.site.heroImage, 1200),
+    ],
   },
 };
 

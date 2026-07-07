@@ -13,7 +13,7 @@ export default function ArtworkBlock({
   return (
     <figure id={artwork.slug} className="px-2 pb-8">
       <ArtworkImage
-        publicId={artwork.image}
+        src={artwork.image}
         alt={artwork.name}
         aspect={artwork.aspect ?? 1.5}
         priority={priority}
