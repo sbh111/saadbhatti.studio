@@ -40,8 +40,8 @@ body {
   color: var(--color-ink);
   /* The carpet frame: the ornate border of siteBorder.png is sliced and
      painted on all four sides at a real, viewport-scaled thickness. */
-  border: clamp(18px, 3.2vw, 52px) solid transparent;
-  border-image: url("/images/siteBorder.png") 19% 13% round;
+  border: clamp(20px, 4vw, 60px) solid transparent;
+  border-image: url("/images/siteBorder.png") 16% 10% round;
 }
 
 /* Scroll without a visible scrollbar (used by the sidebar) */
