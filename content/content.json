@@ -1,19 +1,17 @@
 {
   "site": {
     "title": "Saad Bhatti's Studio",
-    "intro": "Howdy, I'm Saad Bhatti, and welcome to my studio. Feel free to explore my work.",
+    "intro": "Howdy, I'm Saad Bhatti. Welcome to my studio. Feel free to explore my work.",
     "bio": [
-      "I'm Saad Bhatti, a Software Engineer by trade, but a creative at heart.",
-      "I've been shooting film for a few years on my film cameras, and have expanded my creative endeavors to oil painting."
+      "I'm Saad Bhatti, a Software Engineer by trade, and a creative at heart.",
+      "I've been shooting film for a few years on my film cameras, and have collected a body of work here that I would like y'all to see and enjoy!",
+      "I've also expanded my creative pursuits to include Painting, mostly in Oil. So look out for those some time soon!",
+      "Feel free to inquire about prints! I'm trying to set a little business up."
     ],
     "contact": {
       "instagram": "https://instagram.com/sbhphotographyaccount/"
     },
     "heroImage": "/images/hero.jpg",
     "headshotImage": "/images/headshot.jpg"
-  },
-  "mediums": [
-    { "slug": "photography", "displayName": "photography", "status": "published" },
-    { "slug": "oil-paintings", "displayName": "oil paintings", "status": "wip" }
-  ]
+  }
 }

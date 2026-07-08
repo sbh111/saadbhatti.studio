@@ -15,6 +15,23 @@ function ancestorsOf(pathname: string): string[] {
   return ids;
 }
 
+/** All node ids beneath `id` (exclusive), so collapsing a branch closes its subtree. */
+function descendantIds(nodes: NavNode[], id: string): string[] {
+  function find(list: NavNode[]): NavNode | undefined {
+    for (const n of list) {
+      if (n.id === id) return n;
+      const hit = find(n.children);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+  function collect(node: NavNode): string[] {
+    return node.children.flatMap((c) => [c.id, ...collect(c)]);
+  }
+  const node = find(nodes);
+  return node ? collect(node) : [];
+}
+
 function Chevron({ open, active }: { open: boolean; active: boolean }) {
   return (
     <svg
@@ -56,8 +73,13 @@ export default function NavTree({
   function toggle(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        // collapsing a node also collapses everything beneath it
+        next.delete(id);
+        for (const d of descendantIds(tree, id)) next.delete(d);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   }
@@ -84,10 +106,10 @@ export default function NavTree({
     }`;
 
     const labelClasses = node.nested
-      ? "text-sm text-ink-muted"
+      ? "text-[15px] text-ink-muted"
       : isActive
-        ? "text-[15px] font-semibold text-steel"
-        : "text-[15px] text-ink";
+        ? "text-base font-semibold text-steel"
+        : "text-base text-ink";
 
     return (
       <li key={node.id}>
@@ -125,8 +147,15 @@ export default function NavTree({
             </button>
           )}
         </div>
-        {hasChildren && isOpen && (
-          <ul>{node.children.map((child) => renderNode(child))}</ul>
+        {hasChildren && (
+          <div
+            className="grid transition-[grid-template-rows] duration-200 ease-out motion-reduce:transition-none"
+            style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
+          >
+            <ul className="overflow-hidden" inert={!isOpen || undefined}>
+              {node.children.map((child) => renderNode(child))}
+            </ul>
+          </div>
         )}
       </li>
     );

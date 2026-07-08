@@ -12,9 +12,22 @@
   --color-placeholder: #c7cbd0;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-pixel: var(--font-press-start), var(--font-inter), monospace;
 
   /* Sidebar becomes persistent at the desktop breakpoint (spec §3.3) */
   --breakpoint-desk: 900px;
+
+  --animate-fadein: fadein 180ms ease-out;
+  --animate-drawer: drawer 220ms ease-out;
+
+  @keyframes fadein {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes drawer {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
 }
 
 html,
@@ -25,6 +38,18 @@ body {
 body {
   background: var(--color-page);
   color: var(--color-ink);
+  /* The carpet frame: the ornate border of siteBorder.png is sliced and
+     painted on all four sides at a real, viewport-scaled thickness. */
+  border: clamp(18px, 3.2vw, 52px) solid transparent;
+  border-image: url("/images/siteBorder.png") 19% 13% round;
+}
+
+/* Scroll without a visible scrollbar (used by the sidebar) */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Anchor targets scroll clear of the scroll container edge */

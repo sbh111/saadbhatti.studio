@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Press_Start_2P } from "next/font/google";
 import { Analytics } from "@vercel/analytics/react";
 import { content } from "@/lib/content";
 import { getCatalog } from "@/lib/catalog";
@@ -15,6 +15,12 @@ const inter = Inter({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-inter",
+});
+
+const pressStart = Press_Start_2P({
+  subsets: ["latin"],
+  weight: "400",
+  variable: "--font-press-start",
 });
 
 export const metadata: Metadata = {
@@ -39,7 +45,9 @@ export default async function RootLayout({
 }) {
   const tree = buildNavTree(await getCatalog());
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={`${inter.variable} ${pressStart.variable}`}>
+      {/* The carpet frame lives on <body> as a border-image (see globals.css);
+          the shell fills the content box inside it. */}
       <body className="h-screen overflow-hidden font-sans antialiased">
         <AppShell tree={tree}>{children}</AppShell>
         <Analytics />

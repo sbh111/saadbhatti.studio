@@ -13,7 +13,7 @@ export default function LandingView() {
           sizes="(min-width: 900px) 780px, calc(100vw - 40px)"
         />
       </div>
-      <p className="max-w-[600px] text-center text-[17px] leading-relaxed text-ink">
+      <p className="max-w-[620px] text-center text-lg leading-relaxed text-ink">
         {content.site.intro}
       </p>
     </div>

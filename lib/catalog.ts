@@ -1,21 +1,23 @@
 import { cache } from "react";
-import { content, type MediumDef } from "./content";
 import { CLOUD_NAME } from "./cloudinary";
 
 /**
- * Cloudinary is the source of truth for artwork (Pattern A). The environment
- * uses DYNAMIC FOLDERS: an asset's folder is the `asset_folder` attribute and
- * its filename is the `display_name` — public ids are opaque strings.
+ * Cloudinary is the source of truth for ALL artwork structure (Pattern A).
+ * The environment uses DYNAMIC FOLDERS: an asset's folder is the
+ * `asset_folder` attribute and its filename is the `display_name` —
+ * public ids are opaque strings.
  *
- * - collections: the subfolders of `/<medium>/` (folder name = collection title)
- * - membership:  assets whose asset_folder is `/<medium>/<collection>`
+ * - mediums:     the ROOT folders (folder name = medium label in the sidebar)
+ * - collections: the subfolders of each medium (folder name = collection title)
+ * - membership:  assets whose asset_folder is `<medium>/<collection>`
  * - order:       alphabetical by display_name — prefix files 01-, 02-, …
  * - name:        contextual metadata "Title Name" (falls back to the built-in
  *                Title/caption, then to a prettified display_name)
- * - metadata:    contextual keys "Film" (photography) and
- *                "Medium" / "Dimensions" / "Year" (paintings)
+ * - metadata:    any of the contextual keys Film, Medium, Dimensions, Year —
+ *                whichever are present render, in that order
  *
- * Site text and the medium list stay in content/content.json.
+ * A medium with no artworks renders the WIP view. Nothing here is
+ * medium-specific: add any new root folder in Cloudinary and it appears.
  */
 
 export interface CatalogArtwork {
@@ -33,10 +35,14 @@ export interface CatalogCollection {
   slug: string;
   name: string;
   cover: string | null;
+  coverAspect: number;
   artworks: CatalogArtwork[];
 }
 
-export interface CatalogMedium extends MediumDef {
+export interface CatalogMedium {
+  slug: string;
+  /** The root folder name, displayed verbatim in the sidebar */
+  displayName: string;
   collections: CatalogCollection[];
 }
 
@@ -48,6 +54,19 @@ interface CloudinaryResource {
   height: number;
   context?: { custom?: Record<string, string> } & Record<string, unknown>;
 }
+
+interface CloudinaryFolder {
+  name: string;
+  path: string;
+}
+
+/** Contextual metadata rendered for any medium, in this order, blanks skipped */
+const META_KEYS: [label: string, ...contextKeys: string[]][] = [
+  ["Film", "Film", "film"],
+  ["Medium", "Medium", "medium"],
+  ["Dimensions", "Dimensions", "dimensions"],
+  ["Year", "Year", "year"],
+];
 
 function authHeader(): string {
   const key = process.env.CLOUDINARY_API_KEY;
@@ -101,26 +120,19 @@ function prettifyFilename(basename: string): string {
   );
 }
 
-function metaLineFor(mediumSlug: string, resource: CloudinaryResource): string {
-  if (mediumSlug === "photography") {
-    const film = contextValue(resource, "Film", "film");
-    return film ? `Film: ${film}` : "";
-  }
+function metaLine(resource: CloudinaryResource): string {
   const parts: string[] = [];
-  const medium = contextValue(resource, "Medium", "medium");
-  const dimensions = contextValue(resource, "Dimensions", "dimensions");
-  const year = contextValue(resource, "Year", "year");
-  if (medium) parts.push(`Medium: ${medium}`);
-  if (dimensions) parts.push(`Dimensions: ${dimensions}`);
-  if (year) parts.push(`Year: ${year}`);
+  for (const [label, ...keys] of META_KEYS) {
+    const value = contextValue(resource, ...keys);
+    if (value) parts.push(`${label}: ${value}`);
+  }
   return parts.join(" · ");
 }
 
 async function fetchCollection(
-  mediumSlug: string,
+  folderPath: string,
   folderName: string
 ): Promise<CatalogCollection> {
-  const folderPath = `${mediumSlug}/${folderName}`;
   const data = await api<{ resources?: CloudinaryResource[] }>(
     `/resources/by_asset_folder?asset_folder=${encodeURIComponent(folderPath)}&max_results=500&context=true`
   );
@@ -143,7 +155,7 @@ async function fetchCollection(
         resource.width && resource.height
           ? resource.width / resource.height
           : 1.5,
-      metaLine: metaLineFor(mediumSlug, resource),
+      metaLine: metaLine(resource),
     }));
   return {
     // folder name IS the collection title (may contain spaces/capitals);
@@ -151,36 +163,37 @@ async function fetchCollection(
     slug: slugify(folderName),
     name: folderName,
     cover: artworks[0]?.image ?? null,
+    coverAspect: artworks[0]?.aspect ?? 1.5,
     artworks,
   };
 }
 
-async function fetchMediumCollections(
-  mediumSlug: string
-): Promise<CatalogCollection[]> {
-  const data = await api<{ folders?: { name: string; path: string }[] }>(
-    `/folders/${encodeURIComponent(mediumSlug)}?max_results=100`
+async function fetchMedium(folder: CloudinaryFolder): Promise<CatalogMedium> {
+  const data = await api<{ folders?: CloudinaryFolder[] }>(
+    `/folders/${encodeURIComponent(folder.path)}?max_results=100`
   );
-  const folders = (data.folders ?? []).sort((a, b) =>
+  const subfolders = (data.folders ?? []).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
   const collections = await Promise.all(
-    folders.map((folder) => fetchCollection(mediumSlug, folder.name))
+    subfolders.map((sub) => fetchCollection(sub.path, sub.name))
   );
-  return collections.filter((c) => c.artworks.length > 0);
+  return {
+    slug: slugify(folder.name),
+    displayName: folder.name,
+    collections: collections.filter((c) => c.artworks.length > 0),
+  };
 }
 
-/** Full catalog: content.json medium defs + Cloudinary folders/metadata. Deduped per render. */
+/** Full catalog straight from Cloudinary's folder tree. Deduped per render. */
 export const getCatalog = cache(async (): Promise<CatalogMedium[]> => {
-  return Promise.all(
-    content.mediums.map(async (medium) => {
-      if (medium.status === "wip") return { ...medium, collections: [] };
-      return {
-        ...medium,
-        collections: await fetchMediumCollections(medium.slug),
-      };
-    })
+  const data = await api<{ folders?: CloudinaryFolder[] }>(
+    "/folders?max_results=100"
   );
+  const roots = (data.folders ?? []).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+  return Promise.all(roots.map((folder) => fetchMedium(folder)));
 });
 
 export async function getCatalogMedium(
@@ -198,18 +211,7 @@ export async function getCatalogCollection(
   );
 }
 
-export function countLabel(
-  collection: CatalogCollection,
-  mediumSlug: string
-): string {
+export function countLabel(collection: CatalogCollection): string {
   const n = collection.artworks.length;
-  const noun =
-    mediumSlug === "photography"
-      ? n === 1
-        ? "photograph"
-        : "photographs"
-      : n === 1
-        ? "painting"
-        : "paintings";
-  return `${n} ${noun}`;
+  return n === 1 ? "1 piece" : `${n} pieces`;
 }

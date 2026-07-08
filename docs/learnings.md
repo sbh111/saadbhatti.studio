@@ -51,7 +51,10 @@ exists anywhere.
 - **React** — the templating + composition layer. A *component* is a pure function:
   `props in → UI description out`. Pages are built by composing these functions.
   Think of components as well-factored private functions in a service class, except
-  the return type is markup.
+  the return type is markup. (Yes, this site **is** React — every file in
+  `components/` and `app/` is a React component. It's easy to miss: modern React
+  needs no `import React` line, and Next.js is a framework *built on* React the way
+  Spring Boot is built on Spring.)
 - **TypeScript** — same role as in backend code. The interfaces in `lib/catalog.ts`
   (`CatalogArtwork`, `CatalogCollection`, `CatalogMedium`) are the domain model.
 - **Tailwind CSS** — utility-class styling. Instead of a separate stylesheet with

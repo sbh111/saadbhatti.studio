@@ -10,7 +10,7 @@ function Wordmark({ onNavigate }: { onNavigate?: () => void }) {
     <Link
       href="/"
       onClick={onNavigate}
-      className="block whitespace-nowrap text-[22px] font-bold tracking-tight text-ink"
+      className="block whitespace-nowrap font-pixel text-[15px] leading-relaxed text-ink"
     >
       Saad Bhatti
     </Link>
@@ -25,7 +25,7 @@ function SidebarContent({
   onNavigate?: () => void;
 }) {
   return (
-    <div className="flex h-full flex-col overflow-y-auto pb-5 pt-6">
+    <div className="no-scrollbar flex h-full flex-col overflow-y-auto pb-5 pt-6">
       <div className="px-3.5 pb-3.5">
         <Wordmark onNavigate={onNavigate} />
       </div>
@@ -49,7 +49,7 @@ export default function AppShell({
     <div className="flex h-full flex-col desk:flex-row">
       {/* Mobile top bar */}
       <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-hairline bg-panel px-4 desk:hidden">
-        <span className="whitespace-nowrap text-[17px] font-bold tracking-tight text-ink">
+        <span className="whitespace-nowrap font-pixel text-[12px] text-ink">
           <Link href="/">Saad Bhatti</Link>
         </span>
         <button
@@ -66,7 +66,7 @@ export default function AppShell({
       </header>
 
       {/* Desktop sidebar */}
-      <aside className="hidden w-[220px] shrink-0 border-r border-hairline bg-panel desk:block">
+      <aside className="hidden w-[236px] shrink-0 border-r border-hairline bg-panel desk:block">
         <SidebarContent tree={tree} />
       </aside>
 
@@ -76,17 +76,19 @@ export default function AppShell({
           <button
             type="button"
             aria-label="Close menu"
-            className="absolute inset-0 bg-black/35"
+            className="absolute inset-0 animate-fadein bg-black/35 motion-reduce:animate-none"
             onClick={closeDrawer}
           />
-          <div className="absolute inset-y-0 left-0 w-[300px] max-w-[85vw] bg-panel shadow-xl transition-transform motion-reduce:transition-none">
+          <div className="absolute inset-y-0 left-0 w-[300px] max-w-[85vw] animate-drawer bg-panel shadow-xl motion-reduce:animate-none">
             <SidebarContent tree={tree} onNavigate={closeDrawer} />
           </div>
         </div>
       )}
 
-      {/* Main content area — its own scroll region */}
-      <main className="min-w-0 grow overflow-y-auto bg-page">{children}</main>
+      {/* Main content area — its own scroll region, smooth anchor scrolling */}
+      <main className="min-w-0 grow scroll-smooth overflow-y-auto bg-page motion-reduce:scroll-auto">
+        {children}
+      </main>
     </div>
   );
 }
