@@ -237,21 +237,45 @@ Cloudinary + a few lines in the manifest. An admin UI over this comes in Phase 1
 
 ## 10. Phasing
 
-- **Phase 0 (this build):** sidebar + tree, Landing, About, CollectionsView, CollectionView,
+- **Phase 0 (shipped):** sidebar + tree, Landing, About, CollectionsView, CollectionView,
   WIPView, Cloudinary + manifest, capped images, responsive/mobile, analytics, site meta.
   Portfolio only — no commerce, no admin.
-- **Phase 1 (later):** ArtWorkView with print/purchase; admin panel (upload/replace images,
-  create & reorder collections, edit names + metadata, reorder artworks, publish/WIP toggle)
-  behind **Vercel password protection**; an **order-log view** (table of orders: status, time
-  submitted, and other fields). *(Q16, Q17, Q18)*
+- **Phase 0.5 (shipped):** pixel font (Press Start 2P) for headings/wordmark, a decorative
+  carpet-style border image around the whole site, fluid nav-tree motion (animated
+  expand/collapse, collapsing a branch also collapses its descendants) and smooth anchor
+  scrolling, images that scale to fit the viewport instead of the main content area, and the
+  **removal of `content.json`'s medium/collection data** — mediums and collections are now
+  fully generic, driven entirely by Cloudinary's folder tree (`lib/catalog.ts`), so adding a
+  new medium is purely a Cloudinary operation with zero code changes.
+- **Phase 1 — admin capabilities (in progress, sliced into sub-phases):**
+  - **1a — admin auth + metadata editing:** a single-admin login (session cookie, no user
+    accounts table) gates a new `/admin` area. The sidebar's `admin` node is only visible when
+    logged in. From `/admin`, Saad can edit an artwork's title and its per-medium metadata
+    (Film / Medium / Dimensions / Year) — these writes go straight to Cloudinary's contextual
+    metadata, keeping Cloudinary the single source of truth for artwork data established in
+    Phase 0.5, rather than introducing a database for data Cloudinary already owns. Edits
+    appear on the live site within seconds, not the usual hourly refresh window.
+  - **1b — drag-to-reorder:** a drag-and-drop control (in the admin area) to reorder artworks
+    within a collection, with an "Apply" step that updates the underlying Cloudinary filenames
+    to match the new order — no database needed for this either, since order is (and stays) a
+    Cloudinary-native concept.
+  - **1c — ArtWorkView + comments:** a dedicated page per artwork with a visitor-facing form
+    (name/email + comment). This is the first feature with no Cloudinary equivalent, so it
+    introduces the project's first real database — Postgres, managed (Neon/Vercel Postgres) in
+    production, run locally in Docker for development. Submitted comments appear in a new
+    admin-only "comment log" page, reachable from a `comment log` entry nested under the
+    sidebar's `admin` node (sibling to `about me` and `art`).
+- **Stack additions for Phase 1:** Next.js Route Handlers (no separate backend service —
+  everything still deploys as one Vercel project), a lightweight cookie-based session for the
+  single admin login, and (from 1c onward) Prisma + Postgres.
 
 ---
 
 ## 11. Workflow from here
 
-1. ✅ Answers folded into this plan (v2).
-2. ✅ Figma design built (`figma-console`): sidebar + nav tree, all five views, desktop +
-   mobile (hamburger) frames, Inter type styles, slate color styles.
-3. ✅ Design refined (slate palette, flat surfaces, one-line wordmark, right-edge chevrons,
-   full-width collection covers). Hand-off spec written: `fable-handoff-spec.md`.
-4. **→ Fable builds the site** from the approved design + spec.
+1. ✅ Phase 0 answers folded into this plan (v2), Figma design built and refined, site built
+   and shipped by Fable.
+2. ✅ Phase 0.5 feedback (`docs/questionsAndConcerns.md`) implemented and shipped.
+3. **→ Phase 1a in progress** — admin login + Cloudinary-backed title/metadata editing
+   (implementation plan tracked separately). 1b (reorder) and 1c (comments + comment log)
+   follow once 1a ships.

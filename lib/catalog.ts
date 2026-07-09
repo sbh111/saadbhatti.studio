@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { CLOUD_NAME } from "./cloudinary";
+import { apiGet } from "./cloudinaryAdmin";
 
 /**
  * Cloudinary is the source of truth for ALL artwork structure (Pattern A).
@@ -29,6 +29,10 @@ export interface CatalogArtwork {
   aspect: number;
   /** Pre-rendered metadata line, e.g. "Film: Portra 400"; empty if none */
   metaLine: string;
+  /** Raw context title ("Title Name"/caption), if set — empty when the name is filename-derived */
+  contextTitle: string;
+  /** Raw per-label metadata values (Film/Medium/Dimensions/Year), blanks omitted — admin form prefill */
+  metaFields: Record<string, string>;
 }
 
 export interface CatalogCollection {
@@ -61,39 +65,12 @@ interface CloudinaryFolder {
 }
 
 /** Contextual metadata rendered for any medium, in this order, blanks skipped */
-const META_KEYS: [label: string, ...contextKeys: string[]][] = [
+export const META_KEYS: [label: string, ...contextKeys: string[]][] = [
   ["Film", "Film", "film"],
   ["Medium", "Medium", "medium"],
   ["Dimensions", "Dimensions", "dimensions"],
   ["Year", "Year", "year"],
 ];
-
-function authHeader(): string {
-  const key = process.env.CLOUDINARY_API_KEY;
-  const secret = process.env.CLOUDINARY_API_SECRET;
-  if (!key || !secret) {
-    throw new Error(
-      "Missing CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET. Locally: put them in .env.local (see .env.local.example). On Vercel: Project → Settings → Environment Variables."
-    );
-  }
-  return `Basic ${Buffer.from(`${key}:${secret}`).toString("base64")}`;
-}
-
-async function api<T>(path: string): Promise<T> {
-  const response = await fetch(
-    `https://api.cloudinary.com/v1_1/${CLOUD_NAME}${path}`,
-    {
-      headers: { Authorization: authHeader() },
-      next: { revalidate: 3600 },
-    }
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Cloudinary Admin API ${path} failed: HTTP ${response.status} ${await response.text()}`
-    );
-  }
-  return response.json() as Promise<T>;
-}
 
 function contextValue(
   resource: CloudinaryResource,
@@ -120,20 +97,26 @@ function prettifyFilename(basename: string): string {
   );
 }
 
-function metaLine(resource: CloudinaryResource): string {
-  const parts: string[] = [];
+function metaFieldsOf(resource: CloudinaryResource): Record<string, string> {
+  const fields: Record<string, string> = {};
   for (const [label, ...keys] of META_KEYS) {
     const value = contextValue(resource, ...keys);
-    if (value) parts.push(`${label}: ${value}`);
+    if (value) fields[label] = value;
   }
-  return parts.join(" · ");
+  return fields;
+}
+
+function metaLineOf(metaFields: Record<string, string>): string {
+  return META_KEYS.filter(([label]) => metaFields[label])
+    .map(([label]) => `${label}: ${metaFields[label]}`)
+    .join(" · ");
 }
 
 async function fetchCollection(
   folderPath: string,
   folderName: string
 ): Promise<CatalogCollection> {
-  const data = await api<{ resources?: CloudinaryResource[] }>(
+  const data = await apiGet<{ resources?: CloudinaryResource[] }>(
     `/resources/by_asset_folder?asset_folder=${encodeURIComponent(folderPath)}&max_results=500&context=true`
   );
   const artworks = (data.resources ?? [])
@@ -145,18 +128,23 @@ async function fetchCollection(
       return { resource, filename };
     })
     .sort((a, b) => a.filename.localeCompare(b.filename))
-    .map(({ resource, filename }) => ({
-      slug: slugify(filename),
-      name:
-        contextValue(resource, "Title Name", "caption", "Title", "title") ??
-        prettifyFilename(filename),
-      image: resource.public_id,
-      aspect:
-        resource.width && resource.height
-          ? resource.width / resource.height
-          : 1.5,
-      metaLine: metaLine(resource),
-    }));
+    .map(({ resource, filename }) => {
+      const contextTitle =
+        contextValue(resource, "Title Name", "caption", "Title", "title") ?? "";
+      const metaFields = metaFieldsOf(resource);
+      return {
+        slug: slugify(filename),
+        name: contextTitle || prettifyFilename(filename),
+        image: resource.public_id,
+        aspect:
+          resource.width && resource.height
+            ? resource.width / resource.height
+            : 1.5,
+        metaLine: metaLineOf(metaFields),
+        contextTitle,
+        metaFields,
+      };
+    });
   return {
     // folder name IS the collection title (may contain spaces/capitals);
     // the URL uses a clean slug of it
@@ -169,7 +157,7 @@ async function fetchCollection(
 }
 
 async function fetchMedium(folder: CloudinaryFolder): Promise<CatalogMedium> {
-  const data = await api<{ folders?: CloudinaryFolder[] }>(
+  const data = await apiGet<{ folders?: CloudinaryFolder[] }>(
     `/folders/${encodeURIComponent(folder.path)}?max_results=100`
   );
   const subfolders = (data.folders ?? []).sort((a, b) =>
@@ -187,7 +175,7 @@ async function fetchMedium(folder: CloudinaryFolder): Promise<CatalogMedium> {
 
 /** Full catalog straight from Cloudinary's folder tree. Deduped per render. */
 export const getCatalog = cache(async (): Promise<CatalogMedium[]> => {
-  const data = await api<{ folders?: CloudinaryFolder[] }>(
+  const data = await apiGet<{ folders?: CloudinaryFolder[] }>(
     "/folders?max_results=100"
   );
   const roots = (data.folders ?? []).sort((a, b) =>

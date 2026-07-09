@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import type { NavNode } from "@/lib/nav";
+import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { buildAdminNavNode, type NavNode } from "@/lib/nav";
 import NavTree from "./NavTree";
 
 function Wordmark({ onNavigate }: { onNavigate?: () => void }) {
@@ -45,6 +46,31 @@ export default function AppShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const closeDrawer = () => setDrawerOpen(false);
 
+  // The session cookie is HttpOnly, so admin status is resolved with one small
+  // fetch; the server-rendered tree stays public/static for everyone else.
+  // Re-checked on every route change: login/logout redirect via client-side
+  // navigation, so the shell never remounts — a mount-only check would go stale.
+  const pathname = usePathname();
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/admin/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : { isAdmin: false }))
+      .then((data) => {
+        if (!cancelled) setAdmin(data.isAdmin === true);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
+  // about me · admin · art — admin sits between its siblings when logged in
+  const fullTree = useMemo(
+    () => (admin ? [tree[0], buildAdminNavNode(), ...tree.slice(1)] : tree),
+    [tree, admin]
+  );
+
   return (
     <div className="flex h-full flex-col desk:flex-row">
       {/* Mobile top bar */}
@@ -67,7 +93,7 @@ export default function AppShell({
 
       {/* Desktop sidebar */}
       <aside className="hidden w-[236px] shrink-0 border-r border-hairline bg-panel desk:block">
-        <SidebarContent tree={tree} />
+        <SidebarContent tree={fullTree} />
       </aside>
 
       {/* Mobile drawer */}
@@ -80,7 +106,7 @@ export default function AppShell({
             onClick={closeDrawer}
           />
           <div className="absolute inset-y-0 left-0 w-[300px] max-w-[85vw] animate-drawer bg-panel shadow-xl motion-reduce:animate-none">
-            <SidebarContent tree={tree} onNavigate={closeDrawer} />
+            <SidebarContent tree={fullTree} onNavigate={closeDrawer} />
           </div>
         </div>
       )}
