@@ -102,6 +102,20 @@ Those were some of my component and layout ideas. Remember, this is a rough draf
 Here are some Ideas I have for phase 1:
 * An Admin User, which gets certain features/abilities.:
 	* The ability to modify titles and metadata of Images.
-	* The ability to modify image order inside a collection. Maybe a right sidebar pops up when in Collection View in which I can drag and modify the order of images. There should be an 'apply changes' button that pushes the changes to Cloudinary API.
+	* The ability to modify image order inside a collection. 
+		* Maybe a right sidebar pops up when in Collection View in which I can drag and modify the order of images. There should be an 'apply changes' button that pushes the changes to Cloudinary API that would update the prefixes of the names.
 
-* Lets use typescript and nodejs for the backend. If we need to save modified data before pushing, we could use a lightweight DB. Would that work with vercel hosting?
+* Lets use typescript and nodejs for the backend. If we need to save modified data before pushing, we could use a lightweight DB. Would that work with vercel hosting? would we have to host the server somewhere else? like AWS?
+	* another reason i'm insisting on a DB is to get more experience using these technologies to put on my resume. That way i could get NoSQL/SQL and Docker on my resume.
+* Go ahead with the ArtWork view. I want there to be a section under the image that allows a visitor to submit their email, a comment, and press send. 
+* I was thinking to implement an comment log page, where comments and emails from above are listed; Under an admin tab in the sidebar navtree. I Something like the following structure, with admin tab under about me when an admin user:
+
+>>```
+about me
+admin
+	comment log
+art
+	paintings
+	photography
+```
+
