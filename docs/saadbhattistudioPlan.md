@@ -94,3 +94,14 @@ Holds a hi-res image of the ArtWork and holds the name.
 
 Those were some of my component and layout ideas. Remember, this is a rough draft, I am not familiar with Front-End and I’m sure i’m missing many things. Please help me refine this plan and fill out the information gaps that you need to execute this plan cleanly.
 
+
+==========================================================================================================================
+
+# Phase 1 Plan
+
+Here are some Ideas I have for phase 1:
+* An Admin User, which gets certain features/abilities.:
+	* The ability to modify titles and metadata of Images.
+	* The ability to modify image order inside a collection. Maybe a right sidebar pops up when in Collection View in which I can drag and modify the order of images. There should be an 'apply changes' button that pushes the changes to Cloudinary API.
+
+* Lets use typescript and nodejs for the backend. If we need to save modified data before pushing, we could use a lightweight DB. Would that work with vercel hosting?

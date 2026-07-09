@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { content } from "@/lib/content";
 import ArtworkImage from "@/components/ArtworkImage";
 
-export const metadata: Metadata = { title: `about — ${content.site.title}` };
+export const metadata: Metadata = { title: `about - ${content.site.title}` };
 
 export default function AboutMeView() {
   const { site } = content;
@@ -35,13 +35,19 @@ export default function AboutMeView() {
                 rel="noopener noreferrer"
                 className="mt-1.5 block text-lg text-steel underline-offset-4 hover:underline"
               >
-                Instagram — @sbhphotographyaccount
+                Instagram - {new URL(site.contact.instagram).pathname.replace(/^\/+|\/+$/g, '')}
               </a>
             )}
-            {!site.contact.email && (
-              <p className="mt-1 text-[15px] text-ink-muted">
-                Business email coming soon
-              </p>
+            {
+              site.contact.email && (
+                <a
+                href={site.contact.email}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-1.5 block text-lg text-steel underline-offset-4 hover:underline"
+              >
+                Email - {site.contact.email}
+              </a>
             )}
           </div>
         </div>
