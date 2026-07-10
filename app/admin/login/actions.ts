@@ -11,7 +11,9 @@ export async function loginAction(formData: FormData) {
   const session = await getSession();
   session.isAdmin = true;
   await session.save();
-  redirect("/admin");
+  // No admin dashboard — land on the home page; editing happens inline on
+  // CollectionView and the admin bar appears at the bottom.
+  redirect("/");
 }
 
 export async function logoutAction() {

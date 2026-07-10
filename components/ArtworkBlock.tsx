@@ -1,7 +1,9 @@
 import type { CatalogArtwork } from "@/lib/catalog";
 import ArtworkImage from "./ArtworkImage";
+import ArtworkCaption from "./ArtworkCaption";
 
-/** One artwork in a CollectionView: fit-to-screen image, name + metadata below. */
+/** One artwork in a CollectionView: fit-to-screen image, name + metadata below
+ *  (inline-editable when logged in as admin — see ArtworkCaption). */
 export default function ArtworkBlock({
   artwork,
   priority = false,
@@ -21,12 +23,13 @@ export default function ArtworkBlock({
         className="mx-auto mt-3 max-w-full"
         style={{ width: `min(100%, calc(${artwork.aspect} * 66vh))` }}
       >
-        <div className="text-lg font-medium text-ink">{artwork.name}</div>
-        {artwork.metaLine && (
-          <div className="mt-0.5 text-[15px] text-ink-muted">
-            {artwork.metaLine}
-          </div>
-        )}
+        <ArtworkCaption
+          publicId={artwork.image}
+          name={artwork.name}
+          metaLine={artwork.metaLine}
+          contextTitle={artwork.contextTitle}
+          metaFields={artwork.metaFields}
+        />
       </figcaption>
     </figure>
   );

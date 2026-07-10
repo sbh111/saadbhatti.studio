@@ -6,6 +6,7 @@ import { getCatalog } from "@/lib/catalog";
 import { buildNavTree } from "@/lib/nav";
 import { imageUrl } from "@/lib/cloudinary";
 import AppShell from "@/components/AppShell";
+import AdminProvider from "@/components/AdminProvider";
 import "./globals.css";
 
 /** Re-check Cloudinary for new/changed artwork at most hourly */
@@ -49,7 +50,9 @@ export default async function RootLayout({
       {/* The carpet frame lives on <body> as a border-image (see globals.css);
           the shell fills the content box inside it. */}
       <body className="h-screen overflow-hidden font-sans antialiased">
-        <AppShell tree={tree}>{children}</AppShell>
+        <AdminProvider>
+          <AppShell tree={tree}>{children}</AppShell>
+        </AdminProvider>
         <Analytics />
       </body>
     </html>
