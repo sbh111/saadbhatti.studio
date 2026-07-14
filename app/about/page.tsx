@@ -38,16 +38,14 @@ export default function AboutMeView() {
                 Instagram - {new URL(site.contact.instagram).pathname.replace(/^\/+|\/+$/g, '')}
               </a>
             )}
-            {
-              site.contact.email && (
-                <a
-                href={site.contact.email}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1.5 block text-lg text-steel underline-offset-4 hover:underline"
-              >
-                Email - {site.contact.email}
-              </a>
+            {site.contact.email && (
+              <a
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1.5 block text-lg text-steel underline-offset-4 hover:underline"
+            >
+              Email - {site.contact.email}
+            </a>
             )}
           </div>
         </div>
