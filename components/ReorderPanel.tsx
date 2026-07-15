@@ -170,7 +170,7 @@ export default function ReorderPanel({
   }
 
   return (
-    <aside className="sticky top-0 hidden max-h-[calc(100vh-6rem)] w-[220px] shrink-0 self-start overflow-y-auto px-3 pt-[34px] desk:block">
+    <aside className="sticky top-0 hidden max-h-[calc(100vh-6rem)] w-[220px] shrink-0 self-start overflow-y-auto border-l border-hairline bg-panel px-3 pt-[34px] desk:block">
       <h2 className="mb-2 font-pixel text-[11px] text-ink-muted">reorder</h2>
       <DndContext
         sensors={sensors}
