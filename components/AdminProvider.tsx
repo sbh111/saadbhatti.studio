@@ -12,13 +12,18 @@ import {
 } from "react";
 
 /**
- * Client-side admin state for inline editing on CollectionView.
+ * Client-side admin state for CollectionView: inline metadata editing (1a) and
+ * drag-to-reorder (1b).
  *
- * Edits are staged in localStorage (survive refresh / navigating between
- * collections) until the admin bulk-saves them to Cloudinary or discards them.
- * Two contexts on purpose: captions consume the *stable* EditContext (they hold
- * their own input state locally for speed), while only the AdminBar consumes
- * BarContext, which changes on every keystroke via dirtyCount.
+ * Both are staged in localStorage (survive refresh / navigating between
+ * collections) until the admin bulk-saves to Cloudinary or discards. Three
+ * contexts on purpose, each with its own churn profile:
+ *  - EditContext: stable identity, consumed by every caption (they hold their
+ *    own input state locally for speed).
+ *  - OrderContext: bumps only on drop, consumed by the reorder panel + the
+ *    reorderable list.
+ *  - BarContext: bumps on every keystroke / drop via dirtyCount, consumed only
+ *    by the AdminBar.
  */
 
 export const FIELD_KEYS = [
@@ -32,6 +37,7 @@ export type FieldKey = (typeof FIELD_KEYS)[number];
 export type Fields = Record<FieldKey, string>;
 
 const LS_KEY = "sbh_admin_edits";
+const LS_ORDER_KEY = "sbh_admin_order";
 
 interface EditContextValue {
   isAdmin: boolean;
@@ -43,6 +49,16 @@ interface EditContextValue {
   report: (publicId: string, fields: Fields | null) => void;
 }
 
+interface OrderContextValue {
+  isAdmin: boolean;
+  /** Bumps after hydration, every drop, and after Discard — re-read trigger. */
+  orderVersion: number;
+  /** Staged order (public ids) for a collection path, if any. */
+  getStagedOrder: (collectionPath: string) => string[] | undefined;
+  /** Stage a collection's order, or null when it matches the saved order. */
+  stageOrder: (collectionPath: string, orderedPublicIds: string[] | null) => void;
+}
+
 interface BarContextValue {
   isAdmin: boolean;
   dirtyCount: number;
@@ -52,11 +68,18 @@ interface BarContextValue {
 }
 
 const EditContext = createContext<EditContextValue | null>(null);
+const OrderContext = createContext<OrderContextValue | null>(null);
 const BarContext = createContext<BarContextValue | null>(null);
 
 export function useArtworkEdit() {
   const ctx = useContext(EditContext);
   if (!ctx) throw new Error("useArtworkEdit must be used within AdminProvider");
+  return ctx;
+}
+
+export function useArtworkOrder() {
+  const ctx = useContext(OrderContext);
+  if (!ctx) throw new Error("useArtworkOrder must be used within AdminProvider");
   return ctx;
 }
 
@@ -70,6 +93,15 @@ function loadEdits(): Record<string, Fields> {
   if (typeof window === "undefined") return {};
   try {
     return JSON.parse(window.localStorage.getItem(LS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function loadOrders(): Record<string, string[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(LS_ORDER_KEY) ?? "{}");
   } catch {
     return {};
   }
@@ -98,20 +130,30 @@ export default function AdminProvider({
     };
   }, [pathname]);
 
-  // Staged edits: a mutable ref (avoids re-rendering captions on keystroke) plus
-  // a dirtyCount state that drives only the AdminBar.
+  // Staged edits + staged orders: mutable refs (avoid re-rendering captions /
+  // the list on every change) plus counters that drive the consuming UIs.
   const editsRef = useRef<Record<string, Fields>>({});
+  const orderRef = useRef<Record<string, string[]>>({});
   const [dirtyCount, setDirtyCount] = useState(0);
   const [syncSignal, setSyncSignal] = useState(0);
+  const [orderVersion, setOrderVersion] = useState(0);
   const [saving, setSaving] = useState(false);
+
+  const recomputeDirty = useCallback(() => {
+    setDirtyCount(
+      Object.keys(editsRef.current).length + Object.keys(orderRef.current).length
+    );
+  }, []);
 
   useEffect(() => {
     editsRef.current = loadEdits();
-    setDirtyCount(Object.keys(editsRef.current).length);
+    orderRef.current = loadOrders();
+    recomputeDirty();
     setSyncSignal((s) => s + 1); // let mounted captions re-seed from storage
-  }, []);
+    setOrderVersion((v) => v + 1); // let mounted list/panel re-seed from storage
+  }, [recomputeDirty]);
 
-  const persist = useCallback(() => {
+  const persistEdits = useCallback(() => {
     try {
       window.localStorage.setItem(LS_KEY, JSON.stringify(editsRef.current));
     } catch {
@@ -119,14 +161,25 @@ export default function AdminProvider({
     }
   }, []);
 
+  const persistOrders = useCallback(() => {
+    try {
+      window.localStorage.setItem(
+        LS_ORDER_KEY,
+        JSON.stringify(orderRef.current)
+      );
+    } catch {
+      /* storage full / unavailable — order simply won't survive a refresh */
+    }
+  }, []);
+
   const report = useCallback(
     (publicId: string, fields: Fields | null) => {
       if (fields) editsRef.current[publicId] = fields;
       else delete editsRef.current[publicId];
-      persist();
-      setDirtyCount(Object.keys(editsRef.current).length);
+      persistEdits();
+      recomputeDirty();
     },
-    [persist]
+    [persistEdits, recomputeDirty]
   );
 
   const getStaged = useCallback(
@@ -134,51 +187,103 @@ export default function AdminProvider({
     []
   );
 
+  const stageOrder = useCallback(
+    (collectionPath: string, orderedPublicIds: string[] | null) => {
+      if (orderedPublicIds) orderRef.current[collectionPath] = orderedPublicIds;
+      else delete orderRef.current[collectionPath];
+      persistOrders();
+      recomputeDirty();
+      setOrderVersion((v) => v + 1);
+    },
+    [persistOrders, recomputeDirty]
+  );
+
+  const getStagedOrder = useCallback(
+    (collectionPath: string) => orderRef.current[collectionPath],
+    []
+  );
+
   const discardAll = useCallback(() => {
     editsRef.current = {};
-    persist();
+    orderRef.current = {};
+    persistEdits();
+    persistOrders();
     setDirtyCount(0);
     setSyncSignal((s) => s + 1); // captions reset their inputs to the originals
-  }, [persist]);
+    setOrderVersion((v) => v + 1); // list/panel reset to the saved order
+  }, [persistEdits, persistOrders]);
 
   const saveAll = useCallback(async () => {
-    const entries = Object.entries(editsRef.current);
-    if (entries.length === 0) return;
+    const editEntries = Object.entries(editsRef.current);
+    const reorderEntries = Object.entries(orderRef.current);
+    if (editEntries.length === 0 && reorderEntries.length === 0) return;
     setSaving(true);
     try {
       const res = await fetch("/api/admin/artworks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          entries.map(([publicId, fields]) => ({ publicId, fields }))
-        ),
+        body: JSON.stringify({
+          edits: editEntries.map(([publicId, fields]) => ({
+            publicId,
+            fields,
+          })),
+          reorders: reorderEntries.map(([collectionPath, orderedPublicIds]) => ({
+            collectionPath,
+            orderedPublicIds,
+          })),
+        }),
       });
       if (!res.ok) throw new Error(`save failed: HTTP ${res.status}`);
-      const { failed } = (await res.json()) as { failed: string[] };
-      // Keep any that failed staged so the count reflects reality.
+      const { failedEdits, failedReorders } = (await res.json()) as {
+        savedEdits: number;
+        failedEdits: string[];
+        savedReorders: number;
+        failedReorders: { path: string; reason: "stale" | "error" }[];
+      };
+
+      // Keep failed edits staged so the count reflects reality.
       const remaining: Record<string, Fields> = {};
-      for (const id of failed ?? []) {
+      for (const id of failedEdits ?? []) {
         if (editsRef.current[id]) remaining[id] = editsRef.current[id];
       }
       editsRef.current = remaining;
-      persist();
-      setDirtyCount(Object.keys(remaining).length);
+      persistEdits();
+
+      // Reorders are NOT cleared here: successful ones self-clear via the
+      // reorderable list's cleanup effect once router.refresh() delivers the new
+      // server order (avoids an order flash); failed ones must stay staged for
+      // retry. Nothing to prune from orderRef.
+      recomputeDirty();
       setSyncSignal((s) => s + 1);
-      router.refresh(); // pull the freshly-saved values back from Cloudinary
-      if (failed?.length) {
-        alert(`${failed.length} artwork(s) failed to save and are still staged.`);
+      setOrderVersion((v) => v + 1);
+      router.refresh(); // pull freshly-saved values + new order from Cloudinary
+
+      const failedTotal =
+        (failedEdits?.length ?? 0) + (failedReorders?.length ?? 0);
+      if (failedTotal > 0) {
+        const stale = (failedReorders ?? []).some((r) => r.reason === "stale");
+        alert(
+          `${failedTotal} change(s) failed to save and are still staged.` +
+            (stale
+              ? " A reorder was stale (the collection changed in Cloudinary) — discard and re-drag it."
+              : "")
+        );
       }
     } catch (err) {
       console.error(err);
-      alert("Save failed. Your edits are still staged — try again.");
+      alert("Save failed. Your changes are still staged — try again.");
     } finally {
       setSaving(false);
     }
-  }, [persist, router]);
+  }, [persistEdits, recomputeDirty, router]);
 
   const editValue = useMemo<EditContextValue>(
     () => ({ isAdmin, syncSignal, getStaged, report }),
     [isAdmin, syncSignal, getStaged, report]
+  );
+  const orderValue = useMemo<OrderContextValue>(
+    () => ({ isAdmin, orderVersion, getStagedOrder, stageOrder }),
+    [isAdmin, orderVersion, getStagedOrder, stageOrder]
   );
   const barValue = useMemo<BarContextValue>(
     () => ({ isAdmin, dirtyCount, saving, saveAll, discardAll }),
@@ -187,7 +292,9 @@ export default function AdminProvider({
 
   return (
     <EditContext.Provider value={editValue}>
-      <BarContext.Provider value={barValue}>{children}</BarContext.Provider>
+      <OrderContext.Provider value={orderValue}>
+        <BarContext.Provider value={barValue}>{children}</BarContext.Provider>
+      </OrderContext.Provider>
     </EditContext.Provider>
   );
 }

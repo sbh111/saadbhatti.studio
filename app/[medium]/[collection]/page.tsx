@@ -8,6 +8,8 @@ import {
   getCatalogMedium,
 } from "@/lib/catalog";
 import ArtworkBlock from "@/components/ArtworkBlock";
+import ReorderableArtworkList from "@/components/ReorderableArtworkList";
+import ReorderPanel from "@/components/ReorderPanel";
 
 export async function generateStaticParams() {
   const catalog = await getCatalog();
@@ -39,19 +41,41 @@ export default async function CollectionView({
   if (!data) notFound();
 
   return (
-    <div className="pb-10">
-      <header className="px-[30px] pb-5 pt-[34px]">
-        <h1 className="font-pixel text-xl leading-relaxed text-ink">
-          {data.name}
-        </h1>
-        <p className="mt-1.5 text-[15px] text-ink-muted">
-          {countLabel(data)}
-          {mediumData ? ` · ${mediumData.displayName}` : ""}
-        </p>
-      </header>
-      {data.artworks.map((artwork, i) => (
-        <ArtworkBlock key={artwork.slug} artwork={artwork} priority={i < 2} />
-      ))}
+    // Flex row so the admin-only reorder panel can sit to the right of the image
+    // stack. The panel renders null for visitors, leaving the main column full
+    // width — logged-out layout is unchanged.
+    <div className="flex">
+      <div className="min-w-0 grow pb-10">
+        <header className="px-[30px] pb-5 pt-[34px]">
+          <h1 className="font-pixel text-xl leading-relaxed text-ink">
+            {data.name}
+          </h1>
+          <p className="mt-1.5 text-[15px] text-ink-muted">
+            {countLabel(data)}
+            {mediumData ? ` · ${mediumData.displayName}` : ""}
+          </p>
+        </header>
+        <ReorderableArtworkList
+          collectionPath={data.path}
+          publicIds={data.artworks.map((a) => a.image)}
+        >
+          {data.artworks.map((artwork, i) => (
+            <ArtworkBlock
+              key={artwork.slug}
+              artwork={artwork}
+              priority={i < 2}
+            />
+          ))}
+        </ReorderableArtworkList>
+      </div>
+      <ReorderPanel
+        collectionPath={data.path}
+        artworks={data.artworks.map((a) => ({
+          slug: a.slug,
+          name: a.name,
+          image: a.image,
+        }))}
+      />
     </div>
   );
 }
