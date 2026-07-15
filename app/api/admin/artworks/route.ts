@@ -2,34 +2,48 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import { META_KEYS } from "@/lib/catalog";
-import { updateArtworkContext } from "@/lib/cloudinaryAdmin";
+import { reorderCollection, updateArtworkContext } from "@/lib/cloudinaryAdmin";
 
 interface EditPayload {
   publicId: string;
   fields: Record<string, string>;
 }
 
+interface ReorderPayload {
+  collectionPath: string;
+  orderedPublicIds: string[];
+}
+
+interface RequestBody {
+  edits?: EditPayload[];
+  reorders?: ReorderPayload[];
+}
+
 /**
- * Bulk metadata write: takes every staged edit at once, merges each into its
- * asset's Cloudinary contextual metadata, then invalidates the catalog cache so
- * changes are live within seconds. Per-item failures are reported back (still
- * staged client-side) rather than failing the whole batch.
+ * Bulk write for both 1a metadata edits and 1b reorders in one request/one
+ * revalidation. Metadata edits merge into each asset's Cloudinary context
+ * (allSettled — per-item failures reported, not fatal); reorders renumber
+ * filename prefixes sequentially (each returns ok / stale / error). Anything
+ * that fails stays staged client-side; a retry heals (reorders are idempotent).
  */
 export async function POST(request: NextRequest) {
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  let edits: EditPayload[];
+  let body: RequestBody;
   try {
-    edits = await request.json();
-    if (!Array.isArray(edits)) throw new Error("expected an array");
+    body = await request.json();
+    if (typeof body !== "object" || body === null) throw new Error("bad body");
   } catch {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
+  const edits = Array.isArray(body.edits) ? body.edits : [];
+  const reorders = Array.isArray(body.reorders) ? body.reorders : [];
 
+  // --- Metadata edits (parallel, as in 1a) ---
   const metaLabels = META_KEYS.map(([label]) => label);
-  const results = await Promise.allSettled(
+  const editResults = await Promise.allSettled(
     edits.map(({ publicId, fields }) => {
       // Title → the "Title Name" key (first in the catalog read chain); the
       // rest are the generic metadata labels.
@@ -40,20 +54,40 @@ export async function POST(request: NextRequest) {
       return updateArtworkContext(publicId, context);
     })
   );
-
-  const failed = edits
-    .filter((_, i) => results[i].status === "rejected")
+  const failedEdits = edits
+    .filter((_, i) => editResults[i].status === "rejected")
     .map((e) => e.publicId);
-  results.forEach((r, i) => {
+  editResults.forEach((r, i) => {
     if (r.status === "rejected") {
-      console.error(`save failed for ${edits[i].publicId}:`, r.reason);
+      console.error(`edit save failed for ${edits[i].publicId}:`, r.reason);
     }
   });
 
-  if (failed.length < edits.length) {
+  // --- Reorders (sequential — deterministic partial state, rate-limit-safe) ---
+  const failedReorders: { path: string; reason: "stale" | "error" }[] = [];
+  let savedReorders = 0;
+  for (const { collectionPath, orderedPublicIds } of reorders) {
+    const result = await reorderCollection(collectionPath, orderedPublicIds);
+    if (result.ok) {
+      savedReorders++;
+    } else {
+      if (result.reason === "error") {
+        console.error(`reorder failed for ${collectionPath}:`, result.message);
+      }
+      failedReorders.push({ path: collectionPath, reason: result.reason });
+    }
+  }
+
+  const savedEdits = edits.length - failedEdits.length;
+  if (savedEdits > 0 || savedReorders > 0) {
     revalidateTag("catalog", "max");
     revalidatePath("/", "layout");
   }
 
-  return NextResponse.json({ saved: edits.length - failed.length, failed });
+  return NextResponse.json({
+    savedEdits,
+    failedEdits,
+    savedReorders,
+    failedReorders,
+  });
 }

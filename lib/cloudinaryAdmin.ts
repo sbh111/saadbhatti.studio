@@ -97,3 +97,105 @@ export async function updateArtworkContext(
     );
   }
 }
+
+/**
+ * Rename an asset's display_name (its filename) WITHOUT touching public_id.
+ * Deliberately the Admin API update endpoint — not the Upload-API `rename` —
+ * so public_id (the stable key for staged edits, delivery URLs, future 1c DB
+ * rows) never changes. De-risked empirically: this call preserves public_id,
+ * asset_folder, and context.custom (an update that omits `context` leaves the
+ * existing context intact — no REPLACE wipe).
+ */
+export async function updateDisplayName(
+  publicId: string,
+  displayName: string
+): Promise<void> {
+  const response = await fetch(
+    `${BASE}/resources/image/upload/${encodeURIComponent(publicId)}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: authHeader(),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ display_name: displayName }),
+      cache: "no-store",
+    }
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Cloudinary display_name update for "${publicId}" failed: HTTP ${response.status} ${await response.text()}`
+    );
+  }
+}
+
+export type ReorderResult =
+  | { ok: true }
+  | { ok: false; reason: "stale" | "error"; message?: string };
+
+/**
+ * Reorder a collection by renumbering the `NN-` filename prefixes so that the
+ * catalog's localeCompare(display_name) sort yields `orderedPublicIds`.
+ *
+ * Order = alphabetical display_name, so position N gets a zero-padded prefix
+ * (uniform width within the collection: max(2, digits(count))). The original
+ * suffix is preserved by stripping any existing leading digits with the same
+ * regex prettifyFilename uses. Applied SEQUENTIALLY (rate-limit-friendly,
+ * deterministic partial state) and no-ops are skipped, so a partial failure
+ * leaves the reorder staged and re-saving recomputes + heals — idempotent.
+ */
+export async function reorderCollection(
+  collectionPath: string,
+  orderedPublicIds: string[]
+): Promise<ReorderResult> {
+  try {
+    // Fresh (uncached) read of the live folder membership + current filenames.
+    const data = await apiGetFresh<{
+      resources?: { public_id: string; display_name?: string }[];
+    }>(
+      `/resources/by_asset_folder?asset_folder=${encodeURIComponent(
+        collectionPath
+      )}&max_results=500`
+    );
+    const resources = data.resources ?? [];
+
+    // Stale check: if the live public_id set differs from what was staged (an
+    // asset was added/removed since staging), refuse — bulk renames are
+    // destructive, so reject rather than merge-guess. Stays staged client-side.
+    const liveIds = new Set(resources.map((r) => r.public_id));
+    const stagedIds = new Set(orderedPublicIds);
+    const sameSize = liveIds.size === stagedIds.size;
+    const sameMembers = [...stagedIds].every((id) => liveIds.has(id));
+    if (!sameSize || !sameMembers) {
+      return { ok: false, reason: "stale" };
+    }
+
+    const currentName = new Map(
+      resources.map((r) => [
+        r.public_id,
+        r.display_name ?? r.public_id.split("/").pop() ?? r.public_id,
+      ])
+    );
+    const width = Math.max(2, String(orderedPublicIds.length).length);
+
+    // Sequential apply; skip no-ops (already-correct names) so retries are cheap.
+    for (let i = 0; i < orderedPublicIds.length; i++) {
+      const publicId = orderedPublicIds[i];
+      const prefix = String(i + 1).padStart(width, "0");
+      const suffix = (currentName.get(publicId) ?? publicId).replace(
+        /^\d+[-_ ]*/,
+        ""
+      );
+      const nextName = `${prefix}-${suffix}`;
+      if (nextName === currentName.get(publicId)) continue;
+      await updateDisplayName(publicId, nextName);
+    }
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "error",
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}

@@ -29,7 +29,7 @@ export default function AdminBar() {
       {dirtyCount > 0 && (
         <div className="flex items-center gap-3">
           <span className="text-ink-muted">
-            {dirtyCount} unsaved {dirtyCount === 1 ? "edit" : "edits"}
+            {dirtyCount} unsaved {dirtyCount === 1 ? "change" : "changes"}
           </span>
           <button
             type="button"

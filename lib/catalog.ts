@@ -38,6 +38,8 @@ export interface CatalogArtwork {
 export interface CatalogCollection {
   slug: string;
   name: string;
+  /** Cloudinary folder path (e.g. "photography/SouthWest") — the reorder key */
+  path: string;
   cover: string | null;
   coverAspect: number;
   artworks: CatalogArtwork[];
@@ -150,6 +152,7 @@ async function fetchCollection(
     // the URL uses a clean slug of it
     slug: slugify(folderName),
     name: folderName,
+    path: folderPath,
     cover: artworks[0]?.image ?? null,
     coverAspect: artworks[0]?.aspect ?? 1.5,
     artworks,
