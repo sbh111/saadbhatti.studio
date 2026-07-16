@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import type { NavNode } from "@/lib/nav";
+import { useMemo, useState } from "react";
+import { buildAdminNavNode, type NavNode } from "@/lib/nav";
 import NavTree from "./NavTree";
 import AdminBar from "./AdminBar";
+import { useIsAdmin } from "./AdminProvider";
 
 function Wordmark({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -46,6 +47,18 @@ export default function AppShell({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const closeDrawer = () => setDrawerOpen(false);
 
+  // The public tree is server-built and static; the admin node is spliced in
+  // client-side (post-hydration) only when logged in, between "about me" (0)
+  // and "art" (1). Desktop sidebar + mobile drawer share SidebarContent, so
+  // both pick it up.
+  const isAdmin = useIsAdmin();
+  const navTree = useMemo(() => {
+    if (!isAdmin) return tree;
+    const next = [...tree];
+    next.splice(1, 0, buildAdminNavNode());
+    return next;
+  }, [tree, isAdmin]);
+
   return (
     // Outer column so the AdminBar can sit below the sidebar+main row, inside
     // the carpet border, without covering it (no fixed positioning).
@@ -71,7 +84,7 @@ export default function AppShell({
 
         {/* Desktop sidebar */}
         <aside className="hidden w-[236px] shrink-0 border-r border-hairline bg-panel desk:block">
-          <SidebarContent tree={tree} />
+          <SidebarContent tree={navTree} />
         </aside>
 
         {/* Mobile drawer */}
@@ -88,7 +101,7 @@ export default function AppShell({
               onClick={closeDrawer}
             />
             <div className="absolute inset-y-0 left-0 w-[300px] max-w-[85vw] animate-drawer bg-panel shadow-xl motion-reduce:animate-none">
-              <SidebarContent tree={tree} onNavigate={closeDrawer} />
+              <SidebarContent tree={navTree} onNavigate={closeDrawer} />
             </div>
           </div>
         )}

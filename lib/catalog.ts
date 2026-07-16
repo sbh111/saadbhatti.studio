@@ -206,3 +206,34 @@ export function countLabel(collection: CatalogCollection): string {
   const n = collection.artworks.length;
   return n === 1 ? "1 piece" : `${n} pieces`;
 }
+
+/** An artwork plus where it lives — the value type of the public_id index. */
+export interface CatalogArtworkRef {
+  artwork: CatalogArtwork;
+  mediumSlug: string;
+  collectionSlug: string;
+}
+
+/**
+ * Flat `public_id → artwork + location` view of the catalog. Phase D uses it to
+ * validate an inquiry's artworkPublicId + snapshot its trusted title (server
+ * side, never client-supplied) and to join the admin comment log back to a
+ * thumbnail and a `/[medium]/[collection]#slug` link. Deduped per render.
+ */
+export const getArtworkIndex = cache(
+  async (): Promise<Map<string, CatalogArtworkRef>> => {
+    const index = new Map<string, CatalogArtworkRef>();
+    for (const medium of await getCatalog()) {
+      for (const collection of medium.collections) {
+        for (const artwork of collection.artworks) {
+          index.set(artwork.image, {
+            artwork,
+            mediumSlug: medium.slug,
+            collectionSlug: collection.slug,
+          });
+        }
+      }
+    }
+    return index;
+  }
+);

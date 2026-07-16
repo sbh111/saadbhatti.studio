@@ -62,6 +62,39 @@ else as a Cloudinary public id.)
 Images are delivered capped at **2048px long edge** (`c_limit`) with `f_auto,q_auto`,
 responsive `srcset`, lazy loading, and a blur-up placeholder. Originals stay off-site.
 
+## Local database (inquiries)
+
+Private inquiries ("comment log") are stored in Postgres via Prisma — Neon in production,
+a local Docker Postgres for development. **DB URLs live in `.env`** (not `.env.local`)
+because the Prisma CLI reads only `.env`; Next.js reads both. Copy `.env.example` to `.env`
+(the committed local Docker URLs work as-is) and add `IP_HASH_SALT` to `.env.local` (see
+`.env.local.example`).
+
+```bash
+docker compose up -d              # start Postgres 16 (container sbh-studio-db, :5432)
+npx prisma migrate dev            # first run: create tables from prisma/migrations
+npm run dev                       # http://localhost:3000
+
+npx prisma studio                 # browse/edit rows in the browser
+docker compose down               # stop (data persists in the named volume)
+docker compose down -v            # stop AND wipe the volume (full reset)
+```
+
+`prisma generate` runs automatically on `npm install` (postinstall). The app connects
+lazily, so `next build` never needs a running database.
+
+### Production migrations (manual)
+
+Migrations are **not** run in the Vercel build (content redeploys stay decoupled from DB
+availability). After adding a migration, apply it to Neon by hand with the Neon URLs as
+real env vars (real env beats `.env` in Prisma's precedence — no dotenv-cli needed):
+
+```powershell
+$env:DATABASE_URL="<neon pooled ...?sslmode=require&pgbouncer=true>"
+$env:DIRECT_URL="<neon direct ...?sslmode=require>"
+npx prisma migrate deploy
+```
+
 ## Deploy
 
 Hosted on Vercel (project linked to this repo; pushes to `main` deploy).
