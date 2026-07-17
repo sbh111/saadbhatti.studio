@@ -48,9 +48,25 @@ export function buildNavTree(mediums: CatalogMedium[]): NavNode[] {
 /**
  * The admin nav entry, spliced in client-side (AppShell) only when logged in.
  * Kept out of buildNavTree so the public tree stays fully static — reading the
- * session in the root layout would force every page dynamic. Phase 1c adds a
- * "comment log" child here; nothing else needs to change.
+ * session in the root layout would force every page dynamic.
+ *
+ * Expand-only parent (no href — /admin has no page; NavTree renders href-less
+ * nodes as toggle buttons, and ancestorsOf auto-expands id "/admin" on
+ * /admin/comments). A future "order log" sibling drops in as another child.
  */
 export function buildAdminNavNode(): NavNode {
-  return { id: "/admin", label: "admin", href: "/admin", depth: 0, children: [] };
+  return {
+    id: "/admin",
+    label: "admin",
+    depth: 0,
+    children: [
+      {
+        id: "/admin/comments",
+        label: "comment log",
+        href: "/admin/comments",
+        depth: 1,
+        children: [],
+      },
+    ],
+  };
 }

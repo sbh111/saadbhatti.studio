@@ -1,0 +1,25 @@
+# Local development database.
+# Usage:  docker compose up -d     start (data persists in the named volume)
+#         docker compose down      stop
+#         docker compose down -v   stop + wipe data (fresh re-migrate)
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sbh-studio-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sbh
+      POSTGRES_PASSWORD: sbh_local_dev # local-only; never a real secret
+      POSTGRES_DB: sbh_studio
+    ports:
+      - "5432:5432"
+    volumes:
+      - sbh_studio_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sbh -d sbh_studio"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sbh_studio_pgdata:

@@ -1,0 +1,35 @@
+// Phase D: private inquiries ("comment log"). First database.
+// Artworks are referenced by Cloudinary public_id ONLY (the 1b stable-key
+// invariant), with a server-resolved title snapshot per row so the log
+// survives artwork renames/deletions.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // pooled (Neon -pooler in prod)
+  directUrl = env("DIRECT_URL") // direct — migrate/introspect
+}
+
+enum InquiryStatus {
+  NEW
+  READ
+}
+
+model Inquiry {
+  id              String        @id @default(cuid())
+  artworkPublicId String        @db.VarChar(255) // ONLY stable artwork key
+  artworkTitle    String        @db.VarChar(255) // server-resolved snapshot
+  name            String        @db.VarChar(100)
+  email           String        @db.VarChar(254)
+  message         String        @db.VarChar(2000)
+  status          InquiryStatus @default(NEW)
+  ipHash          String        @db.VarChar(64) // sha256(ip + IP_HASH_SALT)
+  createdAt       DateTime      @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([ipHash, createdAt])
+  @@map("inquiries")
+}

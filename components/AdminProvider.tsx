@@ -24,6 +24,10 @@ import {
  *    reorderable list.
  *  - BarContext: bumps on every keystroke / drop via dirtyCount, consumed only
  *    by the AdminBar.
+ *  - AdminStatusContext: bare logged-in flag whose identity changes ONLY on
+ *    login/logout — consumed by things that just need "am I admin?" (the nav
+ *    splice, the inquiry form's admin-hide) without the churn of the three
+ *    above (Bar bumps per keystroke, Edit/Order bump on sync/drop).
  */
 
 export const FIELD_KEYS = [
@@ -67,9 +71,14 @@ interface BarContextValue {
   discardAll: () => void;
 }
 
+interface AdminStatusContextValue {
+  isAdmin: boolean;
+}
+
 const EditContext = createContext<EditContextValue | null>(null);
 const OrderContext = createContext<OrderContextValue | null>(null);
 const BarContext = createContext<BarContextValue | null>(null);
+const AdminStatusContext = createContext<AdminStatusContextValue | null>(null);
 
 export function useArtworkEdit() {
   const ctx = useContext(EditContext);
@@ -87,6 +96,13 @@ export function useAdminBar() {
   const ctx = useContext(BarContext);
   if (!ctx) throw new Error("useAdminBar must be used within AdminProvider");
   return ctx;
+}
+
+/** Just the logged-in flag — stable across edit/order/bar churn. */
+export function useIsAdmin(): boolean {
+  const ctx = useContext(AdminStatusContext);
+  if (!ctx) throw new Error("useIsAdmin must be used within AdminProvider");
+  return ctx.isAdmin;
 }
 
 function loadEdits(): Record<string, Fields> {
@@ -289,12 +305,20 @@ export default function AdminProvider({
     () => ({ isAdmin, dirtyCount, saving, saveAll, discardAll }),
     [isAdmin, dirtyCount, saving, saveAll, discardAll]
   );
+  // Identity changes only when isAdmin flips (login/logout) — see the context
+  // note above.
+  const statusValue = useMemo<AdminStatusContextValue>(
+    () => ({ isAdmin }),
+    [isAdmin]
+  );
 
   return (
-    <EditContext.Provider value={editValue}>
-      <OrderContext.Provider value={orderValue}>
-        <BarContext.Provider value={barValue}>{children}</BarContext.Provider>
-      </OrderContext.Provider>
-    </EditContext.Provider>
+    <AdminStatusContext.Provider value={statusValue}>
+      <EditContext.Provider value={editValue}>
+        <OrderContext.Provider value={orderValue}>
+          <BarContext.Provider value={barValue}>{children}</BarContext.Provider>
+        </OrderContext.Provider>
+      </EditContext.Provider>
+    </AdminStatusContext.Provider>
   );
 }

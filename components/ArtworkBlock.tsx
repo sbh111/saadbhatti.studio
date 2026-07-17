@@ -1,6 +1,7 @@
 import type { CatalogArtwork } from "@/lib/catalog";
 import ArtworkImage from "./ArtworkImage";
 import ArtworkCaption from "./ArtworkCaption";
+import InquiryForm from "./InquiryForm";
 
 /** One artwork in a CollectionView: fit-to-screen image, name + metadata below
  *  (inline-editable when logged in as admin — see ArtworkCaption). */
@@ -29,6 +30,10 @@ export default function ArtworkBlock({
           metaLine={artwork.metaLine}
           contextTitle={artwork.contextTitle}
           metaFields={artwork.metaFields}
+        />
+        <InquiryForm
+          artworkPublicId={artwork.image}
+          artworkName={artwork.name}
         />
       </figcaption>
     </figure>
