@@ -10,7 +10,7 @@ How this fits with the other docs:
 |---|---|
 | **architecture.md** (this) | *How is it built?* Structure, layers, data flow, invariants. |
 | [README.md](../README.md) | *How do I run/deploy it?* Commands, credentials, content workflow. |
-| [learnings.md](learnings.md) | *How do I think about it?* Front-end concepts for a backend engineer. Written at Phase 0 — its "Phase 1" section is now historical. |
+| [learnings.md](learnings.md) | *How do I think about it?* Front-end concepts for a backend engineer, and the hard-won Cloudinary/serverless lessons. |
 | [saadbhattistudioPlan(refined).md](saadbhattistudioPlan(refined).md) | *What is it supposed to be?* Product spec, views, phasing. |
 
 ---
@@ -439,13 +439,6 @@ The Phase D substrate was built to be reused:
 
 ## 15. Known rough edges
 
-- **`@neondatabase/serverless` is an unused dependency.** Nothing imports it; the
-  plan deliberately chose plain pooled connections over `@prisma/adapter-neon`.
-  Safe to remove.
-- **Stale comment in `lib/auth.ts`** referring to `middleware.ts`; the file is
-  `proxy.ts` (Next 16 renamed it). The advice is still correct.
-- **`learnings.md` predates Phases 1a/1b/D** — its "where Phase 1 will plug in"
-  section is now history, not a plan.
 - **No unread badge** on the admin nav: it would put a DB query on every session
   re-check. A `/api/admin/inquiries/count` endpoint is the intended fix.
 - **The comment log caps at 200 rows** with a footnote; pagination is deferred.
