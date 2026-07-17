@@ -4,12 +4,12 @@ import bcrypt from "bcryptjs";
 
 /**
  * Single-admin session auth. The session is a signed + encrypted HttpOnly
- * cookie (iron-session) carrying one flag; there is no user table. Middleware
+ * cookie (iron-session) carrying one flag; there is no user table. The proxy
  * does a cheap cookie-presence check for UX, but every protected Server
  * Component / Route Handler calls getSession()/isAdmin() as the authoritative
- * check — middleware is never the sole security boundary.
+ * check — the proxy is never the sole security boundary.
  *
- * NOTE: middleware.ts duplicates the cookie name as a literal (importing this
+ * NOTE: proxy.ts duplicates the cookie name as a literal (importing this
  * module there would pull bcryptjs into the edge bundle) — keep them in sync.
  */
 
