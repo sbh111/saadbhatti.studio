@@ -103,21 +103,19 @@ It is **best-effort**: the inquiry is saved and shown in the comment log first, 
 email is sent in the background via `after()` from `next/server` — so a mail failure can
 never block or fail a submission, and the endpoint's latency is unchanged.
 
-The send lives in [`lib/mail.ts`](lib/mail.ts). The scaffold builds the message but leaves
-the actual Resend call as a `TODO(saad)` — to finish it:
+The send lives in [`lib/mail.ts`](lib/mail.ts) and is fully implemented — it only needs
+configuring:
 
-1. `npm i resend`
-2. Fill in the `TODO(saad)` in `lib/mail.ts` (import `Resend`, construct it, call
-   `resend.emails.send(payload)`).
-3. In Resend, **verify the `saadbhatti.studio` domain** (add the DNS records it gives you
+1. In Resend, **verify the `saadbhatti.studio` domain** (add the DNS records it gives you
    at Porkbun). Until verified, Resend only delivers to your own account email, and `from`
    must be `onboarding@resend.dev`.
-4. Set three env vars in `.env.local` and in Vercel (see `.env.local.example`):
+2. Set three env vars in `.env.local` and in Vercel (see `.env.local.example`):
    - `RESEND_API_KEY` — from the Resend dashboard.
    - `INQUIRY_NOTIFY_FROM` — an address on the verified domain, e.g. `inquiries@saadbhatti.studio`.
    - `INQUIRY_NOTIFY_TO` — your work email.
 
-If any of the three is unset, the send is skipped with a warning and inquiries keep working.
+If any of the three is unset, the send is skipped with a warning and inquiries keep
+working. If Resend rejects a send, the error is logged and the inquiry is still saved.
 
 ## Deploy
 

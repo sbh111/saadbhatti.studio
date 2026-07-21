@@ -7,14 +7,15 @@
  * BEST-EFFORT by design: the inquiry row is already persisted and shown in the
  * admin comment log before this runs. So unlike lib/auth.ts / lib/inquiries.ts
  * (which throw on missing env), a missing mail config here just warns and no-ops
- * — an unconfigured deploy still accepts inquiries. Send failures are caught by
- * the caller and logged; they must never cost a lead.
+ * — an unconfigured deploy still accepts inquiries. A send failure throws, which
+ * the caller catches and logs; it must never cost a lead.
  *
- * SCAFFOLD: the Resend send itself is left as a TODO for the real implementation
- * (see below). Until it's filled in, this builds the payload and logs that it
- * *would* have sent — no `resend` dependency is imported yet, so the build stays
- * green.
+ * Delivery is Resend. `INQUIRY_NOTIFY_FROM` must be an address on a domain
+ * verified in Resend (before verification, Resend only accepts
+ * onboarding@resend.dev and only delivers to your own account address).
  */
+
+import { Resend } from "resend";
 
 const SITE_URL = "https://saadbhatti.studio";
 
@@ -83,18 +84,24 @@ export async function sendInquiryNotification(
       </p>
     </div>`;
 
-  // The message Resend will send. `replyTo` is the inquirer so a reply reaches
-  // them directly; `from` is an address on the verified saadbhatti.studio domain.
-  const payload = { from, to, replyTo: data.email, subject, text, html };
+  // `replyTo` is the inquirer so a reply reaches them directly; `from` is an
+  // address on the verified saadbhatti.studio domain.
+  // Constructed per call (not at module scope) so a missing key can't throw at
+  // import time — the guard above is the only place config is enforced.
+  const { error } = await new Resend(apiKey).emails.send({
+    from,
+    to,
+    replyTo: data.email,
+    subject,
+    text,
+    html,
+  });
 
-  // TODO(saad): send it via Resend.
-  //   1. npm i resend
-  //   2. import { Resend } from "resend";  (at the top of this file)
-  //   3. const resend = new Resend(apiKey);
-  //   4. const { error } = await resend.emails.send(payload);
-  //      if (error) throw new Error(error.message);  // caller logs it
-  // Until then, log that it was prepared and return (no send).
-  console.log(`[mail] prepared (send not implemented): ${payload.subject}`);
+  // Resend reports failures in the response rather than throwing. Surface it so
+  // the caller's .catch logs it (the inquiry itself is already safe).
+  if (error) {
+    throw new Error(`Resend rejected the send: ${error.message}`);
+  }
 }
 
 /** Minimal HTML-escaping for interpolating user text into the email body. */
