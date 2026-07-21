@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, after, type NextRequest } from "next/server";
 import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
 import { clientIpOf, hashIp, isRateLimited } from "@/lib/inquiries";
+import { sendInquiryNotification } from "@/lib/mail";
 import {
   EMAIL_MAX,
   EMAIL_RE,
@@ -77,6 +78,21 @@ export async function POST(request: NextRequest) {
       ipHash,
     },
   });
+
+  // Best-effort notification, after the response is flushed (never blocks or
+  // fails the submission — the row is already saved and shown in the admin log).
+  after(() =>
+    sendInquiryNotification({
+      name,
+      email,
+      message,
+      artworkTitle: ref.artwork.name,
+      artworkPublicId,
+      artworkSlug: ref.artwork.slug,
+      mediumSlug: ref.mediumSlug,
+      collectionSlug: ref.collectionSlug,
+    }).catch((err) => console.error("inquiry notification failed", err))
+  );
 
   return NextResponse.json({ ok: true }, { status: 201 });
 }

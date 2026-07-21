@@ -95,6 +95,28 @@ $env:DIRECT_URL="<neon direct ...?sslmode=require>"
 npx prisma migrate deploy
 ```
 
+## Email notifications (Resend)
+
+Each new inquiry emails you a notification (with the inquirer set as the reply-to, so
+you can reply straight from your inbox). Delivery is via [Resend](https://resend.com).
+It is **best-effort**: the inquiry is saved and shown in the comment log first, then the
+email is sent in the background via `after()` from `next/server` — so a mail failure can
+never block or fail a submission, and the endpoint's latency is unchanged.
+
+The send lives in [`lib/mail.ts`](lib/mail.ts) and is fully implemented — it only needs
+configuring:
+
+1. In Resend, **verify the `saadbhatti.studio` domain** (add the DNS records it gives you
+   at Porkbun). Until verified, Resend only delivers to your own account email, and `from`
+   must be `onboarding@resend.dev`.
+2. Set three env vars in `.env.local` and in Vercel (see `.env.local.example`):
+   - `RESEND_API_KEY` — from the Resend dashboard.
+   - `INQUIRY_NOTIFY_FROM` — an address on the verified domain, e.g. `inquiries@saadbhatti.studio`.
+   - `INQUIRY_NOTIFY_TO` — your work email.
+
+If any of the three is unset, the send is skipped with a warning and inquiries keep
+working. If Resend rejects a send, the error is logged and the inquiry is still saved.
+
 ## Deploy
 
 Hosted on Vercel (project linked to this repo; pushes to `main` deploy).
