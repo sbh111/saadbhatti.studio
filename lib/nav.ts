@@ -51,8 +51,8 @@ export function buildNavTree(mediums: CatalogMedium[]): NavNode[] {
  * session in the root layout would force every page dynamic.
  *
  * Expand-only parent (no href — /admin has no page; NavTree renders href-less
- * nodes as toggle buttons, and ancestorsOf auto-expands id "/admin" on
- * /admin/comments). A future "order log" sibling drops in as another child.
+ * nodes as toggle buttons, and ancestorsOf auto-expands id "/admin" on any
+ * /admin/* child). Siblings drop in as more children.
  */
 export function buildAdminNavNode(): NavNode {
   return {
@@ -64,6 +64,20 @@ export function buildAdminNavNode(): NavNode {
         id: "/admin/comments",
         label: "comment log",
         href: "/admin/comments",
+        depth: 1,
+        children: [],
+      },
+      {
+        id: "/admin/likes",
+        label: "likes",
+        href: "/admin/likes",
+        depth: 1,
+        children: [],
+      },
+      {
+        id: "/admin/settings",
+        label: "settings",
+        href: "/admin/settings",
         depth: 1,
         children: [],
       },

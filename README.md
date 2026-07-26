@@ -117,6 +117,41 @@ configuring:
 If any of the three is unset, the send is skipped with a warning and inquiries keep
 working. If Resend rejects a send, the error is logged and the inquiry is still saved.
 
+## Event streaming (Kafka — optional learning feature)
+
+A **toggleable** clickstream pipeline: the site streams anonymized page views,
+artwork views, likes, and intent gestures to a Kafka broker via an HTTP
+collector. It is **off by default** and **never affects the site when off or when
+the broker is unreachable** — the collector forward is best-effort (`after()`,
+all errors swallowed, endpoint always 204), exactly like the mail phase. Full
+design + the AWS/Python phases are in [`docs/kafkaEventsPlan.md`](docs/kafkaEventsPlan.md).
+
+**Likes are durable and independent of streaming** — the ♥ under each artwork
+writes a deduped row to Postgres regardless of the toggle, so it keeps working
+even with the broker torn down. Counts are private (admin-only, at `/admin/likes`).
+
+Run the streaming stack locally (Kafka + collector are behind a compose profile,
+so ordinary `docker compose up -d` still starts only Postgres):
+
+```bash
+docker compose --profile streaming up -d     # + Kafka (KRaft) + collector
+```
+
+Then set `EVENT_COLLECTOR_URL` / `EVENT_INGEST_TOKEN` in `.env.local` (see
+`.env.local.example`), flip the toggle **on** at `/admin/settings`, and browse.
+Kafka's `9092` is **not** published to the host (private, like prod) — watch the
+stream with a console consumer inside the container:
+
+```bash
+docker compose exec kafka kafka-console-consumer \
+  --bootstrap-server localhost:9092 --topic web.events.v1 \
+  --from-beginning --property print.key=true
+```
+
+Turn the toggle off, or `docker compose stop collector kafka`, and the site (and
+likes) behave identically. Production deployment (EC2, TLS, security group) and
+the Python analysis consumer are Phases K2/K3 in the plan doc.
+
 ## Deploy
 
 Hosted on Vercel (project linked to this repo; pushes to `main` deploy).

@@ -1,7 +1,11 @@
-# Local development database.
-# Usage:  docker compose up -d     start (data persists in the named volume)
-#         docker compose down      stop
-#         docker compose down -v   stop + wipe data (fresh re-migrate)
+# Local development services.
+# Usage:  docker compose up -d                       Postgres only (day-to-day)
+#         docker compose down                        stop
+#         docker compose down -v                     stop + wipe data
+#         docker compose --profile streaming up -d   + Kafka + collector (K1)
+#
+# The `db` service has no profile, so it always runs. Kafka + the collector are
+# behind the `streaming` profile, so ordinary development never starts them.
 services:
   db:
     image: postgres:16-alpine
@@ -21,5 +25,67 @@ services:
       timeout: 3s
       retries: 10
 
+  # --- Event streaming (Kafka learning phase) — profile "streaming" only ------
+  # Single-node Kafka in KRaft mode (no ZooKeeper). 9092 is NOT published to the
+  # host — the broker is reachable only from inside the compose network (the
+  # collector), mirroring prod where the security group keeps 9092 closed. To
+  # peek at the stream, exec a console consumer INSIDE the container (see README).
+  kafka:
+    image: confluentinc/cp-kafka:7.8.1
+    container_name: sbh-studio-kafka
+    profiles: ["streaming"]
+    restart: unless-stopped
+    environment:
+      # Fixed cluster id so re-creates reuse the same formatted volume.
+      CLUSTER_ID: sbh-studio-kafka-local
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true" # convenience for K1
+      KAFKA_LOG_RETENTION_HOURS: 168 # ~7 days
+      # Matches the K2 free-tier heap pin, so local behaves like the EC2 box.
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms256m"
+    volumes:
+      - sbh_studio_kafka:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  # The HTTP collector: the only door in. It authenticates (bearer token) and
+  # produces to Kafka on the private network. Its port IS published so the Next
+  # dev server on the host can POST to http://localhost:8000/events.
+  collector:
+    build: ./collector
+    container_name: sbh-studio-collector
+    profiles: ["streaming"]
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_TOPIC: web.events.v1
+      # Local-only shared secret; must match EVENT_INGEST_TOKEN in .env.local.
+      # Override by exporting EVENT_INGEST_TOKEN (compose reads .env, not .env.local).
+      EVENT_INGEST_TOKEN: ${EVENT_INGEST_TOKEN:-sbh_local_ingest}
+    ports:
+      - "8000:8000"
+
 volumes:
   sbh_studio_pgdata:
+  sbh_studio_kafka:
