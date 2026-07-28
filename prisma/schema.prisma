@@ -33,3 +33,28 @@ model Inquiry {
   @@index([ipHash, createdAt])
   @@map("inquiries")
 }
+
+// Generic key/value settings. Currently the single event-streaming toggle
+// (key "event_streaming_enabled", value "true"/"false"); future flags reuse it.
+model Setting {
+  key       String   @id @db.VarChar(64)
+  value     String   @db.VarChar(255)
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// A "like" on an artwork — the one explicit interest signal. Durable and
+// independent of the (toggleable) Kafka stream. Deduped one-per-visitor by the
+// same salted IP hash as inquiries; the unique constraint doubles as the rate
+// limit. Referenced by Cloudinary public_id only (the stable-key invariant).
+model Like {
+  id              String   @id @default(cuid())
+  artworkPublicId String   @db.VarChar(255)
+  ipHash          String   @db.VarChar(64) // sha256(ip + IP_HASH_SALT)
+  createdAt       DateTime @default(now())
+
+  @@unique([artworkPublicId, ipHash])
+  @@index([artworkPublicId])
+  @@map("likes")
+}

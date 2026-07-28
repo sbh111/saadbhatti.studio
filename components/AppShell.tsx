@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { buildAdminNavNode, type NavNode } from "@/lib/nav";
 import NavTree from "./NavTree";
 import AdminBar from "./AdminBar";
+import EventTracker from "./EventTracker";
 import { useIsAdmin } from "./AdminProvider";
 
 function Wordmark({ onNavigate }: { onNavigate?: () => void }) {
@@ -114,6 +115,9 @@ export default function AppShell({
 
       {/* Admin controls — renders nothing unless logged in */}
       <AdminBar />
+
+      {/* Clickstream capture — renders nothing; inert unless the toggle is on */}
+      <EventTracker />
     </div>
   );
 }
