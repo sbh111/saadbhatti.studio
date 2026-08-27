@@ -1,0 +1,78 @@
+# Production streaming stack for the EC2 box (Phase K2). Runs ONLY Kafka + the
+# collector + Caddy — Postgres lives on Neon and the Next app on Vercel, so
+# neither is here. See docs/kafkaEventsPlan.md and deploy/README.md.
+#
+# Security model (the whole point of the HTTP-collector design):
+#   - Kafka 9092:     NOT published — reachable only on the internal compose net.
+#   - collector 8000: NOT published — reachable only by Caddy on the net.
+#   - Caddy 80/443:   the ONLY public surface; terminates TLS in front of the
+#                     collector, whose bearer-token check is the actual auth.
+#
+# Usage (on the instance, from this directory):
+#   cp .env.example .env      # then fill in EVENT_INGEST_TOKEN + INGEST_DOMAIN
+#   docker compose -f compose.prod.yml up -d --build
+name: sbh-studio-streaming
+services:
+  kafka:
+    image: confluentinc/cp-kafka:7.8.1
+    container_name: sbh-kafka
+    restart: unless-stopped
+    environment:
+      CLUSTER_ID: sbh-studio-kafka-prod
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168 # ~7 days — free-tier disk is finite
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms256m" # not optional on a 1 GB box
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+  collector:
+    build: ../collector
+    container_name: sbh-collector
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      KAFKA_TOPIC: web.events.v1
+      EVENT_INGEST_TOKEN: ${EVENT_INGEST_TOKEN:?set EVENT_INGEST_TOKEN in deploy/.env}
+    # Deliberately NO published ports — only Caddy reaches it over the network.
+  caddy:
+    image: caddy:2.8
+    container_name: sbh-caddy
+    restart: unless-stopped
+    depends_on:
+      - collector
+    ports:
+      - "80:80" # ACME HTTP challenge + HTTP→HTTPS redirect
+      - "443:443" # the collector's only public door (TLS)
+    environment:
+      INGEST_DOMAIN: ${INGEST_DOMAIN:?set INGEST_DOMAIN in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # persists Let's Encrypt certs across restarts (rate limits!)
+      - caddy_config:/config
+volumes:
+  kafka_data:
+  caddy_data:
+  caddy_config:

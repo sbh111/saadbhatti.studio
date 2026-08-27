@@ -1,0 +1,6 @@
+# Terminates TLS for the collector. Caddy auto-provisions and renews a Let's
+# Encrypt cert for $INGEST_DOMAIN and redirects HTTP→HTTPS automatically. The
+# bearer-token check lives in the collector; Caddy only does TLS + reverse proxy.
+{$INGEST_DOMAIN} {
+	reverse_proxy collector:8000
+}
