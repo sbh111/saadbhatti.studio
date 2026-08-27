@@ -18,6 +18,18 @@ enum InquiryStatus {
   READ
 }
 
+// Outcome of the inquiry-notification email (sent in the background after the
+// row is saved). PENDING is the initial state before the send resolves; SKIPPED
+// means intentionally not sent (daily cap reached, or mail unconfigured) and
+// FAILED means the send threw — both carry a human-readable reason in
+// `emailError` and surface an alert + manual resend in the comment log.
+enum EmailStatus {
+  PENDING
+  SENT
+  SKIPPED
+  FAILED
+}
+
 model Inquiry {
   id              String        @id @default(cuid())
   artworkPublicId String        @db.VarChar(255) // ONLY stable artwork key
@@ -26,12 +38,30 @@ model Inquiry {
   email           String        @db.VarChar(254)
   message         String        @db.VarChar(2000)
   status          InquiryStatus @default(NEW)
+  emailStatus     EmailStatus   @default(PENDING) // notification-email outcome
+  emailError      String?       @db.VarChar(500) // reason when SKIPPED/FAILED
   ipHash          String        @db.VarChar(64) // sha256(ip + IP_HASH_SALT)
   createdAt       DateTime      @default(now())
 
   @@index([createdAt(sort: Desc)])
   @@index([ipHash, createdAt])
   @@map("inquiries")
+}
+
+// Per-IP rate-limit counters. A fixed-window scheme: one row per
+// (bucket, ipHash, windowStart), incremented atomically via upsert. Bounded
+// growth (one row per window, not per request) and the row-level increment
+// avoids a count-then-write race. `ipHash` may be a pseudo-key like "__global__"
+// for site-wide limits. Old windows are inert; sweep occasionally by windowStart.
+model RateWindow {
+  bucket      String   @db.VarChar(64) // "like" | "inquiry" | "events"
+  ipHash      String   @db.VarChar(64) // salted IP hash, or a global pseudo-key
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@id([bucket, ipHash, windowStart])
+  @@index([windowStart])
+  @@map("rate_windows")
 }
 
 // Generic key/value settings. Currently the single event-streaming toggle

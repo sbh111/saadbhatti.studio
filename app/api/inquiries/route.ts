@@ -1,7 +1,9 @@
 import { NextResponse, after, type NextRequest } from "next/server";
+import { EmailStatus } from "@prisma/client";
 import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
 import { clientIpOf, hashIp, isRateLimited } from "@/lib/inquiries";
+import { isRateLimited as rateLimit, DAILY_EMAIL_CAP, DAY_MS } from "@/lib/rateLimit";
 import { sendInquiryNotification } from "@/lib/mail";
 import {
   EMAIL_MAX,
@@ -55,6 +57,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid" }, { status: 400 });
   }
 
+  // DB-backed rate limit (in-memory would be per-serverless-instance = useless).
+  // Checked BEFORE the catalog lookup so an over-budget spammer is turned away
+  // without triggering the Cloudinary fan-out getArtworkIndex() can incur.
+  const ipHash = hashIp(clientIpOf(request));
+  if (await isRateLimited(ipHash)) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  }
+
   // The artwork must exist in the live catalog; its title is snapshotted from
   // there (trusted), never from the client payload. A miss is just "invalid".
   const ref = (await getArtworkIndex()).get(artworkPublicId);
@@ -62,13 +72,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid" }, { status: 400 });
   }
 
-  // DB-backed rate limit (in-memory would be per-serverless-instance = useless).
-  const ipHash = hashIp(clientIpOf(request));
-  if (await isRateLimited(ipHash)) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
-  }
-
-  await prisma.inquiry.create({
+  const inquiry = await prisma.inquiry.create({
     data: {
       artworkPublicId,
       artworkTitle: ref.artwork.name,
@@ -81,18 +85,48 @@ export async function POST(request: NextRequest) {
 
   // Best-effort notification, after the response is flushed (never blocks or
   // fails the submission — the row is already saved and shown in the admin log).
-  after(() =>
-    sendInquiryNotification({
-      name,
-      email,
-      message,
-      artworkTitle: ref.artwork.name,
-      artworkPublicId,
-      artworkSlug: ref.artwork.slug,
-      mediumSlug: ref.mediumSlug,
-      collectionSlug: ref.collectionSlug,
-    }).catch((err) => console.error("inquiry notification failed", err))
-  );
+  // The outcome is recorded on the row so the comment log can flag an un-emailed
+  // inquiry and offer a one-click resend.
+  after(async () => {
+    const mark = (emailStatus: EmailStatus, emailError: string | null) =>
+      prisma.inquiry
+        .update({
+          where: { id: inquiry.id },
+          data: { emailStatus, emailError: emailError?.slice(0, 500) ?? null },
+        })
+        .catch((err) => console.error("inquiry email-status update failed", err));
+
+    // Global daily ceiling — independent of IP, so it holds even against a
+    // distributed / IP-rotating flood the per-IP limit can't see. Over the cap
+    // we skip the email (the lead is already stored) and flag it for resend.
+    if (await rateLimit("inquiry_email", "__global__", DAILY_EMAIL_CAP, DAY_MS)) {
+      await mark(EmailStatus.SKIPPED, "Daily email cap reached");
+      return;
+    }
+
+    try {
+      const dispatched = await sendInquiryNotification({
+        name,
+        email,
+        message,
+        artworkTitle: ref.artwork.name,
+        artworkPublicId,
+        artworkSlug: ref.artwork.slug,
+        mediumSlug: ref.mediumSlug,
+        collectionSlug: ref.collectionSlug,
+      });
+      await mark(
+        dispatched ? EmailStatus.SENT : EmailStatus.SKIPPED,
+        dispatched ? null : "Email notifications are not configured"
+      );
+    } catch (err) {
+      console.error("inquiry notification failed", err);
+      await mark(
+        EmailStatus.FAILED,
+        err instanceof Error ? err.message : "Unknown send error"
+      );
+    }
+  });
 
   return NextResponse.json({ ok: true }, { status: 201 });
 }
