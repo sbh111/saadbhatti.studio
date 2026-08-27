@@ -4,9 +4,10 @@ import { isAdmin } from "@/lib/auth";
 import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
 import { clientIpOf, hashIp } from "@/lib/inquiries";
+import { isRateLimited, LIKE_MAX, LIKE_WINDOW_MS } from "@/lib/rateLimit";
 import { isEventStreamingEnabled } from "@/lib/settings";
 import { forwardEvents, type EnrichedEvent } from "@/lib/collector";
-import { EVENT_SCHEMA_VERSION } from "@/lib/eventTypes";
+import { EVENT_SCHEMA_VERSION, SESSION_ID_MAX } from "@/lib/eventTypes";
 
 /**
  * Public like / unlike for an artwork — the one EXPLICIT interest signal. A
@@ -35,17 +36,30 @@ export async function POST(request: NextRequest) {
     return invalid();
   }
   const artworkPublicId = strOf((body as Record<string, unknown>)?.artworkPublicId);
-  const sessionId = strOf((body as Record<string, unknown>)?.sessionId);
   if (!artworkPublicId) return invalid();
+
+  // sessionId only feeds the optional Kafka event (guarded below), so a bogus
+  // over-long value shouldn't fail the like — just drop it. Cap shared with the
+  // /api/events contract.
+  const rawSessionId = strOf((body as Record<string, unknown>)?.sessionId);
+  const sessionId = rawSessionId.length <= SESSION_ID_MAX ? rawSessionId : "";
+
+  // Owner liking own work is noise; re-check server-side (client flag untrusted).
+  // Cheap cookie unseal (no DB) — also keeps the owner out of the rate limiter.
+  if (await isAdmin()) return noContent();
+
+  // Per-IP throughput gate BEFORE the (potentially expensive) catalog rebuild,
+  // so a flood is short-circuited cheaply. Terse 204 like the dedup path — a
+  // like is idempotent, so bots learn nothing and the optimistic UI is harmless.
+  const ipHash = hashIp(clientIpOf(request));
+  if (await isRateLimited("like", ipHash, LIKE_MAX, LIKE_WINDOW_MS)) {
+    return noContent();
+  }
 
   // The artwork must exist in the live catalog (same trust rule as inquiries).
   const ref = (await getArtworkIndex()).get(artworkPublicId);
   if (!ref) return invalid();
 
-  // Owner liking own work is noise; re-check server-side (client flag untrusted).
-  if (await isAdmin()) return noContent();
-
-  const ipHash = hashIp(clientIpOf(request));
   try {
     await prisma.like.create({ data: { artworkPublicId, ipHash } });
   } catch (err) {
@@ -92,8 +106,13 @@ export async function DELETE(request: NextRequest) {
   if (!artworkPublicId) return invalid();
   if (await isAdmin()) return noContent();
 
-  // deleteMany → idempotent (unliking something not liked is a no-op, not a 404).
+  // Same "like" bucket as POST, so a like/unlike toggle-flood shares one budget.
   const ipHash = hashIp(clientIpOf(request));
+  if (await isRateLimited("like", ipHash, LIKE_MAX, LIKE_WINDOW_MS)) {
+    return noContent();
+  }
+
+  // deleteMany → idempotent (unliking something not liked is a no-op, not a 404).
   await prisma.like.deleteMany({ where: { artworkPublicId, ipHash } });
   return noContent();
 }

@@ -31,9 +31,13 @@ export interface InquiryNotification {
   collectionSlug: string;
 }
 
+/**
+ * @returns true if the email was dispatched to Resend, false if it was skipped
+ * because mail is unconfigured. Throws if Resend rejects the send.
+ */
 export async function sendInquiryNotification(
   data: InquiryNotification
-): Promise<void> {
+): Promise<boolean> {
   const apiKey = process.env.RESEND_API_KEY;
   const to = process.env.INQUIRY_NOTIFY_TO;
   const from = process.env.INQUIRY_NOTIFY_FROM;
@@ -43,7 +47,7 @@ export async function sendInquiryNotification(
     console.warn(
       "[mail] inquiry notification skipped — set RESEND_API_KEY, INQUIRY_NOTIFY_TO, and INQUIRY_NOTIFY_FROM (.env.local locally, Vercel env in prod; see .env.local.example)."
     );
-    return;
+    return false;
   }
 
   const artworkUrl = `${SITE_URL}/${data.mediumSlug}/${data.collectionSlug}#${data.artworkSlug}`;
@@ -102,6 +106,7 @@ export async function sendInquiryNotification(
   if (error) {
     throw new Error(`Resend rejected the send: ${error.message}`);
   }
+  return true;
 }
 
 /** Minimal HTML-escaping for interpolating user text into the email body. */

@@ -7,7 +7,12 @@ import { imageUrl } from "@/lib/cloudinary";
 import { content } from "@/lib/content";
 import { prisma } from "@/lib/db";
 import DeleteInquiryButton from "@/components/DeleteInquiryButton";
-import { deleteInquiryAction, toggleReadAction } from "./actions";
+import InquiryEmailAlert from "@/components/InquiryEmailAlert";
+import {
+  deleteInquiryAction,
+  resendInquiryEmailAction,
+  toggleReadAction,
+} from "./actions";
 
 export const metadata: Metadata = {
   title: `comment log - ${content.site.title}`,
@@ -104,6 +109,14 @@ export default async function CommentLogPage() {
               </p>
 
               <div className="mt-3 flex items-center gap-4 border-t border-hairline pt-2">
+                {inquiry.emailStatus !== "SENT" && (
+                  <InquiryEmailAlert
+                    inquiryId={inquiry.id}
+                    status={inquiry.emailStatus}
+                    error={inquiry.emailError}
+                    resendAction={resendInquiryEmailAction}
+                  />
+                )}
                 <form action={toggleReadAction}>
                   <input type="hidden" name="id" value={inquiry.id} />
                   <input

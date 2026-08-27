@@ -1,6 +1,7 @@
 import { NextResponse, after, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import { clientIpOf, hashIp } from "@/lib/inquiries";
+import { isRateLimited, EVENTS_MAX, EVENTS_WINDOW_MS } from "@/lib/rateLimit";
 import { isEventStreamingEnabled } from "@/lib/settings";
 import { forwardEvents, type EnrichedEvent } from "@/lib/collector";
 import {
@@ -87,6 +88,14 @@ export async function POST(request: NextRequest) {
   // client-side, but the client flag resolves async and can be spoofed.
   if (await isAdmin()) return noContent();
 
+  // Per-IP throughput gate before parsing the body, so a flood is dropped cheaply
+  // even when the (default-off) stream is enabled. Batches are already capped at
+  // MAX_BATCH events each; this bounds request volume. Always 204, like the rest.
+  const ipHash = hashIp(clientIpOf(request));
+  if (await isRateLimited("events", ipHash, EVENTS_MAX, EVENTS_WINDOW_MS)) {
+    return noContent();
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -103,7 +112,6 @@ export async function POST(request: NextRequest) {
   }
   if (clean.length === 0) return noContent();
 
-  const ipHash = hashIp(clientIpOf(request));
   const country = request.headers.get("x-vercel-ip-country");
   const userAgent = request.headers.get("user-agent");
   const receivedAt = new Date().toISOString();
