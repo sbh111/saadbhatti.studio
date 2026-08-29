@@ -48,6 +48,22 @@ export const LIKE_WINDOW_MS = 60_000; // ... per minute (shared POST+DELETE budg
 export const EVENTS_MAX = 120; // clickstream batches (each already ≤25 events) ...
 export const EVENTS_WINDOW_MS = 60_000; // ... per minute
 
+// Search is the one endpoint that runs ML inference per request, so it's the most
+// expensive to abuse — a strict per-IP limit, plus a global ceiling that bounds
+// total inference cost under a distributed / IP-rotating flood the per-IP limit
+// can't see. Values are starting points; tune against real traffic.
+export const SEARCH_MAX = 20; // searches per IP ...
+export const SEARCH_WINDOW_MS = 60_000; // ... per minute
+export const SEARCH_GLOBAL_MAX = 300; // site-wide searches ...
+export const SEARCH_GLOBAL_WINDOW_MS = 60_000; // ... per minute (cost ceiling)
+
+// Query hygiene + result quality for search.
+export const QUERY_MAX_CHARS = 200; // CLIP truncates at ~77 tokens anyway
+// Minimum cosine similarity for a result to count. CLIP text↔image similarities run
+// low in absolute terms (~0.15–0.35), so this floor is deliberately small — TUNE it
+// against real queries so nonsense returns nothing but real matches survive.
+export const MIN_SCORE = 0.18;
+
 // Site-wide daily ceiling on inquiry notification emails (keyed "__global__", not
 // per-IP). Bounds Resend spend even under a distributed / IP-rotating flood that
 // each per-IP limit misses. Set far above real inquiry volume so it only ever

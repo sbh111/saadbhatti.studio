@@ -88,3 +88,16 @@ model Like {
   @@index([artworkPublicId])
   @@map("likes")
 }
+
+// One CLIP image embedding per artwork, keyed by the stable Cloudinary public_id.
+// Written offline by the containerized Python embedder (embed/); read at search
+// time by app/api/search via a raw pgvector query (the `<=>` cosine operator).
+// Prisma has no native vector type, so the column is Unsupported and is never
+// selected through the typed client. Dim 512 = CLIP ViT-B/32 projection.
+model ArtworkEmbedding {
+  publicId  String                     @id @db.VarChar(255)
+  embedding Unsupported("vector(512)")
+  updatedAt DateTime                   @updatedAt
+
+  @@map("artwork_embeddings")
+}

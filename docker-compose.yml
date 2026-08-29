@@ -3,9 +3,11 @@
 #         docker compose down                        stop
 #         docker compose down -v                     stop + wipe data
 #         docker compose --profile streaming up -d   + Kafka + collector (K1)
+#         docker compose --profile embedding up -d embed   CLIP embedder (on-demand)
 #
 # The `db` service has no profile, so it always runs. Kafka + the collector are
-# behind the `streaming` profile, so ordinary development never starts them.
+# behind the `streaming` profile, and the CLIP embedder is behind `embedding`, so
+# ordinary development never starts any of them.
 services:
   db:
     image: postgres:16-alpine
@@ -85,6 +87,33 @@ services:
       EVENT_INGEST_TOKEN: ${EVENT_INGEST_TOKEN:-sbh_local_ingest}
     ports:
       - "8000:8000"
+
+  # --- Image-search embeddings (CLIP) — profile "embedding" only -------------
+  # On-demand, local, no cloud instance. Spin up, probe to refresh vectors, tear
+  # down:
+  #   docker compose --profile embedding up -d embed
+  #   curl -XPOST localhost:8100/reindex -H "Authorization: Bearer $EMBED_TOKEN"
+  #   docker compose down
+  # Pre-trained CLIP ViT-B/32 weights are baked into the image (same variant the
+  # site's JS query encoder uses — model parity). Reads the artwork id list from
+  # the deployed site's admin catalog-index endpoint and writes vectors to Postgres.
+  embed:
+    build: ./embed
+    container_name: sbh-studio-embed
+    profiles: ["embedding"]
+    restart: unless-stopped
+    environment:
+      EMBED_TOKEN: ${EMBED_TOKEN:-sbh_local_embed} # local-only default; override in prod
+      # Artwork id source (deployed site's bearer-gated endpoint) + its bearer. For
+      # a local dev site use http://host.docker.internal:3000/api/catalog-index.
+      CATALOG_INDEX_URL: ${CATALOG_INDEX_URL:-https://saadbhatti.studio/api/catalog-index}
+      CATALOG_INDEX_TOKEN: ${CATALOG_INDEX_TOKEN:-}
+      # Prefer the DIRECT (non-pooled) Neon URL for a real refresh; defaults to the
+      # local db container for testing.
+      EMBED_DATABASE_URL: ${EMBED_DATABASE_URL:-postgresql://sbh:sbh_local_dev@db:5432/sbh_studio}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-sbh111}
+    ports:
+      - "8100:8100"
 
 volumes:
   sbh_studio_pgdata:
