@@ -45,11 +45,14 @@ _model.eval()
 _processor = CLIPProcessor.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
 
 
-def _image_url(public_id: str, width: int = 640) -> str:
-    # Mirrors lib/cloudinary.ts imageUrl().
+def _image_url(public_id: str, width: int = 336) -> str:
+    # CLIP resizes to 224x224 anyway, so we fetch a small source (not the display
+    # 2048): 336 stays above the 224 crop for normal aspect ratios with no upscale,
+    # at ~4x fewer pixels than 640. f_jpg (not f_auto) guarantees a Pillow-decodable
+    # format — f_auto can return AVIF, which Pillow can't decode without a plugin.
     return (
         f"https://res.cloudinary.com/{CLOUD_NAME}/image/upload/"
-        f"f_auto,q_auto,c_limit,w_{width}/{public_id}"
+        f"f_jpg,q_auto,c_limit,w_{width}/{public_id}"
     )
 
 
