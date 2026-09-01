@@ -10,7 +10,6 @@ import {
 import ArtworkBlock from "@/components/ArtworkBlock";
 import ReorderableArtworkList from "@/components/ReorderableArtworkList";
 import ReorderPanel from "@/components/ReorderPanel";
-import SearchPanel from "@/components/SearchPanel";
 
 export async function generateStaticParams() {
   const catalog = await getCatalog();
@@ -69,8 +68,8 @@ export default async function CollectionView({
           ))}
         </ReorderableArtworkList>
       </div>
-      {/* Right slot: admins get the reorder panel, visitors get search. Each
-          renders null for the other role, so exactly one shows. */}
+      {/* Admin-only reorder panel (visitors get null). Search is a global drawer
+          in AppShell, not tied to this page. */}
       <ReorderPanel
         collectionPath={data.path}
         artworks={data.artworks.map((a) => ({
@@ -79,7 +78,6 @@ export default async function CollectionView({
           image: a.image,
         }))}
       />
-      <SearchPanel />
     </div>
   );
 }
