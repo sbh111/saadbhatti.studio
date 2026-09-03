@@ -6,6 +6,7 @@ import { buildAdminNavNode, type NavNode } from "@/lib/nav";
 import NavTree from "./NavTree";
 import AdminBar from "./AdminBar";
 import EventTracker from "./EventTracker";
+import SearchDrawer from "./SearchDrawer";
 import { useIsAdmin } from "./AdminProvider";
 
 function Wordmark({ onNavigate }: { onNavigate?: () => void }) {
@@ -64,7 +65,7 @@ export default function AppShell({
     // Outer column so the AdminBar can sit below the sidebar+main row, inside
     // the carpet border, without covering it (no fixed positioning).
     <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1 flex-col desk:flex-row">
+      <div className="relative flex min-h-0 flex-1 flex-col desk:flex-row">
         {/* Mobile top bar */}
         <header className="flex h-[58px] shrink-0 items-center justify-between border-b border-hairline bg-panel px-4 desk:hidden">
           <span className="whitespace-nowrap font-pixel text-[12px] text-ink">
@@ -111,6 +112,10 @@ export default function AppShell({
         <main className="min-w-0 grow scroll-smooth overflow-y-auto bg-page motion-reduce:scroll-auto">
           {children}
         </main>
+
+        {/* Global visual-search drawer — right-edge handle + full-height slide-in,
+            positioned against this relative content row (inside the carpet frame) */}
+        <SearchDrawer />
       </div>
 
       {/* Admin controls — renders nothing unless logged in */}

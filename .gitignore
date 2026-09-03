@@ -10,3 +10,7 @@ next-env.d.ts
 .DS_Store
 .claude/settings.local.json
 .idea/
+
+# Private keys / certs (e.g. saadbhatti.studio_key.pem) — never commit these
+*.pem
+*.key

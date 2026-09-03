@@ -3,9 +3,11 @@
 #         docker compose down                        stop
 #         docker compose down -v                     stop + wipe data
 #         docker compose --profile streaming up -d   + Kafka + collector (K1)
+#         docker compose --profile embedding up -d embed   CLIP embedder (on-demand)
 #
 # The `db` service has no profile, so it always runs. Kafka + the collector are
-# behind the `streaming` profile, so ordinary development never starts them.
+# behind the `streaming` profile, and the CLIP embedder is behind `embedding`, so
+# ordinary development never starts any of them.
 services:
   db:
     image: postgres:16-alpine
@@ -85,6 +87,42 @@ services:
       EVENT_INGEST_TOKEN: ${EVENT_INGEST_TOKEN:-sbh_local_ingest}
     ports:
       - "8000:8000"
+
+  # --- Image-search embeddings (CLIP) — profile "embedding" only -------------
+  # On-demand, local, no cloud instance. Spin up, probe to refresh vectors, tear
+  # down:
+  #   docker compose --profile embedding up -d embed
+  #   curl -XPOST localhost:8100/reindex -H "Authorization: Bearer $EMBED_TOKEN"
+  #   docker compose down
+  # Pre-trained CLIP ViT-B/32 weights are baked into the image (same variant the
+  # site's JS query encoder uses — model parity). Reads the artwork id list from
+  # the deployed site's admin catalog-index endpoint and writes vectors to Postgres.
+  embed:
+    build: ./embed
+    container_name: sbh-studio-embed
+    profiles: ["embedding"]
+    restart: unless-stopped
+    # Host networking, deliberately: this is a local, on-demand tool that has to
+    # reach BOTH a dev site on the host and the outside world. On a bridge network,
+    # Docker 28+/29 blocks container→host traffic by default, so the gateway IP
+    # times out (and host.docker.internal resolves to the docker0 gateway, which is
+    # not this container's gateway at all). Sharing the host namespace sidesteps
+    # both: the site is plain localhost, and uvicorn's 8100 binds straight onto the
+    # host (so `ports:` is unnecessary — and would be ignored — here).
+    network_mode: host
+    environment:
+      EMBED_TOKEN: ${EMBED_TOKEN:-sbh_local_embed} # local-only default; override in prod
+      # Artwork id source + its bearer. With host networking a local dev site is
+      # just http://localhost:3000/api/catalog-index.
+      # A remote default MUST use the CANONICAL host (www): the apex 308-redirects
+      # to www, and httpx drops the Authorization header across an origin change.
+      CATALOG_INDEX_URL: ${CATALOG_INDEX_URL:-https://www.saadbhatti.studio/api/catalog-index}
+      CATALOG_INDEX_TOKEN: ${CATALOG_INDEX_TOKEN:-}
+      # Prefer the DIRECT (non-pooled) Neon URL for a real refresh; defaults to the
+      # local db container, reached via its published port (host networking means
+      # the compose service name `db` does not resolve here).
+      EMBED_DATABASE_URL: ${EMBED_DATABASE_URL:-postgresql://sbh:sbh_local_dev@localhost:5432/sbh_studio}
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-sbh111}
 
 volumes:
   sbh_studio_pgdata:

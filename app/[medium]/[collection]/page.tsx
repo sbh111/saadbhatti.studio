@@ -68,6 +68,8 @@ export default async function CollectionView({
           ))}
         </ReorderableArtworkList>
       </div>
+      {/* Admin-only reorder panel (visitors get null). Search is a global drawer
+          in AppShell, not tied to this page. */}
       <ReorderPanel
         collectionPath={data.path}
         artworks={data.artworks.map((a) => ({

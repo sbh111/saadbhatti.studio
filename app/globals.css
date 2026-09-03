@@ -19,6 +19,7 @@
 
   --animate-fadein: fadein 180ms ease-out;
   --animate-drawer: drawer 220ms ease-out;
+  --animate-drawer-right: drawer-right 220ms ease-out;
 
   @keyframes fadein {
     from { opacity: 0; }
@@ -26,6 +27,10 @@
   }
   @keyframes drawer {
     from { transform: translateX(-100%); }
+    to { transform: translateX(0); }
+  }
+  @keyframes drawer-right {
+    from { transform: translateX(100%); }
     to { transform: translateX(0); }
   }
 }
