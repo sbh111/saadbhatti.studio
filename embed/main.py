@@ -116,6 +116,26 @@ except Exception as exc:  # noqa: BLE001 — surface at request time, not just a
     log.exception("model load FAILED — /reindex will return 503 until fixed")
 
 
+def _default_gateway() -> str | None:
+    """This container's default gateway (i.e. the host, from in here).
+
+    On Linux, `host.docker.internal:host-gateway` resolves to the DEFAULT bridge
+    (docker0) gateway, which is not this container's gateway when compose puts it
+    on its own network — dialing it black-holes into a timeout. Surfacing the real
+    gateway turns that into a one-line fix instead of a guessing game.
+    """
+    try:
+        with open("/proc/net/route") as fh:
+            for line in fh.readlines()[1:]:
+                parts = line.split()
+                if len(parts) > 2 and parts[1] == "00000000":  # default route
+                    gw = int(parts[2], 16)  # little-endian hex
+                    return ".".join(str((gw >> (8 * i)) & 0xFF) for i in range(4))
+    except OSError:
+        pass
+    return None
+
+
 def _require_env(name: str, stage: str, hint: str = "") -> str:
     value = os.environ.get(name)
     if not value:
@@ -193,12 +213,24 @@ def _fetch_public_ids() -> list[str]:
             follow_redirects=True,
         )
     except httpx.RequestError as exc:
+        gateway = _default_gateway()
+        hint = (
+            "Is the URL reachable from inside the container? localhost points at "
+            "the container itself, not the host."
+        )
+        if gateway:
+            # On Linux, host.docker.internal maps to the docker0 gateway, which is
+            # NOT this container's gateway when compose uses its own network —
+            # dialing it times out. This gateway is the host as seen from here.
+            hint += (
+                f" This container's gateway (the host) is {gateway} — try "
+                f"CATALOG_INDEX_URL=http://{gateway}:3000/api/catalog-index"
+            )
         raise StageError(
             "catalog",
             f"Could not reach the catalog index: {type(exc).__name__}: {exc}",
             status=502,
-            hint="Is the URL reachable from inside the container? For a site on the "
-            "host, use http://host.docker.internal:3000/…, not localhost.",
+            hint=hint,
         ) from exc
 
     redirected = bool(resp.history)
@@ -307,6 +339,9 @@ def health() -> dict:
         "revision": MODEL_REVISION,
         "dim": EMBED_DIM,
         "modelError": _model_error,
+        # The host as seen from inside this container — the address to use in
+        # CATALOG_INDEX_URL when the site runs on the host.
+        "hostGateway": _default_gateway(),
         "env": {  # presence only — never echo secret values
             "EMBED_TOKEN": bool(os.environ.get("EMBED_TOKEN")),
             "CATALOG_INDEX_URL": os.environ.get("CATALOG_INDEX_URL") or None,
