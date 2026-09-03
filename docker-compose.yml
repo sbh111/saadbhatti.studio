@@ -102,6 +102,11 @@ services:
     container_name: sbh-studio-embed
     profiles: ["embedding"]
     restart: unless-stopped
+    # Linux doesn't provide host.docker.internal the way Docker Desktop does; this
+    # maps it to the host gateway so the container can reach a dev site on the host
+    # (harmless on macOS/Windows, where it's already defined).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       EMBED_TOKEN: ${EMBED_TOKEN:-sbh_local_embed} # local-only default; override in prod
       # Artwork id source (deployed site's bearer-gated endpoint) + its bearer. For
