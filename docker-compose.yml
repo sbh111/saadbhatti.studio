@@ -106,7 +106,9 @@ services:
       EMBED_TOKEN: ${EMBED_TOKEN:-sbh_local_embed} # local-only default; override in prod
       # Artwork id source (deployed site's bearer-gated endpoint) + its bearer. For
       # a local dev site use http://host.docker.internal:3000/api/catalog-index.
-      CATALOG_INDEX_URL: ${CATALOG_INDEX_URL:-https://saadbhatti.studio/api/catalog-index}
+      # MUST be the CANONICAL host (www): the apex 308-redirects to www, and httpx
+      # drops the Authorization header across an origin change → a silent 401.
+      CATALOG_INDEX_URL: ${CATALOG_INDEX_URL:-https://www.saadbhatti.studio/api/catalog-index}
       CATALOG_INDEX_TOKEN: ${CATALOG_INDEX_TOKEN:-}
       # Prefer the DIRECT (non-pooled) Neon URL for a real refresh; defaults to the
       # local db container for testing.

@@ -183,8 +183,14 @@ def _fetch_public_ids() -> list[str]:
 
     log.info("fetching catalog index from %s", url)
     try:
+        # Follow redirects (e.g. a trailing-slash 308). NOTE: httpx strips the
+        # Authorization header across an origin change, so an apex→www redirect
+        # silently de-authenticates us — hence the cross-origin check below.
         resp = httpx.get(
-            url, headers={"Authorization": f"Bearer {token}"}, timeout=30.0
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+            follow_redirects=True,
         )
     except httpx.RequestError as exc:
         raise StageError(
@@ -195,12 +201,40 @@ def _fetch_public_ids() -> list[str]:
             "host, use http://host.docker.internal:3000/…, not localhost.",
         ) from exc
 
+    redirected = bool(resp.history)
+    final_url = str(resp.url)
+    cross_origin = redirected and resp.history[0].url.netloc != resp.url.netloc
+    if redirected:
+        log.warning(
+            "catalog index redirected %s → %s%s",
+            url,
+            final_url,
+            " (cross-origin: bearer token was dropped)" if cross_origin else "",
+        )
+
     if resp.status_code == 401:
+        if cross_origin:
+            raise StageError(
+                "catalog",
+                "Catalog index rejected our token (401) after a cross-origin redirect",
+                status=502,
+                hint=f"The redirect to {final_url} dropped the Authorization header. "
+                f"Set CATALOG_INDEX_URL to the canonical URL directly: {final_url}",
+            )
         raise StageError(
             "catalog",
             "Catalog index rejected our token (401)",
             status=502,
             hint="CATALOG_INDEX_TOKEN here must equal CATALOG_INDEX_TOKEN on the site.",
+        )
+    if resp.status_code == 404:
+        raise StageError(
+            "catalog",
+            f"Catalog index not found (404) at {final_url}",
+            status=502,
+            hint="That deployment doesn't have /api/catalog-index yet — deploy the "
+            "search branch, or point CATALOG_INDEX_URL at a local dev site "
+            "(http://host.docker.internal:3000/api/catalog-index).",
         )
     if resp.status_code >= 400:
         raise StageError(
