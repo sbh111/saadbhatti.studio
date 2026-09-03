@@ -159,13 +159,47 @@ def _image_url(public_id: str, width: int = 336) -> str:
     )
 
 
+def _image_embeds(out: object) -> torch.Tensor:
+    """The projected image-embedding tensor from get_image_features().
+
+    Depending on the transformers version this returns either a bare Tensor or a
+    ModelOutput. Indexing a ModelOutput with [0] yields its FIRST FIELD —
+    last_hidden_state, shape (1, 50, 768) for ViT-B/32 — not the batch's first
+    row, so resolve the tensor explicitly instead of subscripting blindly.
+    """
+    if isinstance(out, torch.Tensor):
+        return out
+    for attr in ("image_embeds", "embeds", "pooler_output"):
+        value = getattr(out, attr, None)
+        if isinstance(value, torch.Tensor):
+            return value
+    if isinstance(out, (tuple, list)) and out and isinstance(out[0], torch.Tensor):
+        return out[0]
+    raise ValueError(
+        f"could not find an image-embedding tensor in {type(out).__name__}"
+    )
+
+
 def _embed_image(img: Image.Image) -> np.ndarray:
     inputs = _processor(images=img, return_tensors="pt")
     with torch.no_grad():
-        feats = _model.get_image_features(**inputs)  # [1, 512]
-    vec = feats[0].cpu().numpy().astype(np.float32)
-    if vec.shape != (EMBED_DIM,) or not np.all(np.isfinite(vec)):
-        raise ValueError(f"bad embedding: shape={vec.shape}, non-finite values present")
+        feats = _image_embeds(_model.get_image_features(**inputs))
+
+    feats = feats.detach().cpu().float()
+    if feats.ndim == 2 and feats.shape[0] == 1:
+        feats = feats[0]  # drop the batch dim → (512,)
+    vec = feats.numpy().astype(np.float32)
+
+    # Distinct checks: a wrong shape and a non-finite value are different faults
+    # and must not be reported as the same thing.
+    if vec.shape != (EMBED_DIM,):
+        raise ValueError(
+            f"expected a ({EMBED_DIM},) image embedding, got {tuple(vec.shape)} — "
+            "get_image_features did not return the projected embedding"
+        )
+    if not np.all(np.isfinite(vec)):
+        raise ValueError("image embedding contains non-finite values (NaN/Inf)")
+
     norm = float(np.linalg.norm(vec)) or 1.0
     return vec / norm  # L2-normalized, matching the query side
 
