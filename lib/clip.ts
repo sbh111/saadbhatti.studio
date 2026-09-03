@@ -18,6 +18,7 @@ import type { PreTrainedModel, PreTrainedTokenizer } from "@huggingface/transfor
 
 const MODEL_ID = "Xenova/clip-vit-base-patch32";
 export const EMBED_DIM = 512;
+const CACHE_DIR = "/tmp/hf-cache"
 
 interface TextEncoder {
   tokenizer: PreTrainedTokenizer;
@@ -36,8 +37,8 @@ async function getEncoder(): Promise<TextEncoder> {
       );
       // Load ONLY the text tower — the vision tower never runs in the site.
       const [tokenizer, model] = await Promise.all([
-        AutoTokenizer.from_pretrained(MODEL_ID),
-        CLIPTextModelWithProjection.from_pretrained(MODEL_ID),
+        AutoTokenizer.from_pretrained(MODEL_ID, {cache_dir: CACHE_DIR}),
+        CLIPTextModelWithProjection.from_pretrained(MODEL_ID, {cache_dir: CACHE_DIR}),
       ]);
       return { tokenizer, model };
     })().catch((err) => {
