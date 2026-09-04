@@ -1,5 +1,10 @@
 # architecture.md — how saadbhatti.studio is put together
 
+> **⚠️ Partially stale.** This file is current as of Phase D and predates the likes,
+> settings, event-streaming, rate-limiting, and semantic-search work. For current
+> system state see [system-overview.md](system-overview.md); this remains useful as a
+> deeper structural reference for the parts it does cover.
+
 The structural reference for this codebase: what each directory is for, where data
 comes from, how requests flow, and which invariants must not be broken. Current as
 of **Phase D** (private inquiries / comment log).
