@@ -106,7 +106,7 @@ export async function updateArtworkContext(
  * asset_folder, and context.custom (an update that omits `context` leaves the
  * existing context intact — no REPLACE wipe).
  */
-export async function updateDisplayName(
+async function updateDisplayName(
   publicId: string,
   displayName: string
 ): Promise<void> {
@@ -129,7 +129,7 @@ export async function updateDisplayName(
   }
 }
 
-export type ReorderResult =
+type ReorderResult =
   | { ok: true }
   | { ok: false; reason: "stale" | "error"; message?: string };
 

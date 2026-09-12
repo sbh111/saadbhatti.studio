@@ -208,7 +208,7 @@ export function countLabel(collection: CatalogCollection): string {
 }
 
 /** An artwork plus where it lives — the value type of the public_id index. */
-export interface CatalogArtworkRef {
+interface CatalogArtworkRef {
   artwork: CatalogArtwork;
   mediumSlug: string;
   collectionSlug: string;

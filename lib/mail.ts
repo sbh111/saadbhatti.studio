@@ -19,7 +19,7 @@ import { Resend } from "resend";
 
 const SITE_URL = "https://saadbhatti.studio";
 
-export interface InquiryNotification {
+interface InquiryNotification {
   name: string;
   email: string;
   message: string;
