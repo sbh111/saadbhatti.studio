@@ -101,7 +101,6 @@ services:
     build: ./embed
     container_name: sbh-studio-embed
     profiles: ["embedding"]
-    restart: unless-stopped
     # Host networking, deliberately: this is a local, on-demand tool that has to
     # reach BOTH a dev site on the host and the outside world. On a bridge network,
     # Docker 28+/29 blocks container→host traffic by default, so the gateway IP
