@@ -283,6 +283,40 @@ Save all → POST /api/admin/artworks → write to Cloudinary
 Writes deliberately bypass the cache: `apiGetFresh()` (`cache: "no-store"`) is used
 before every mutation so a read-merge-write starts from live state.
 
+### Error boundaries and degraded rendering (tech debt 1.4)
+
+The root layout builds the nav tree from `getCatalog()` — until this fix, an
+unguarded call there meant a Cloudinary outage threw the **entire layout**,
+taking every route down with it (including the force-dynamic admin pages the
+owner would need to respond to the outage) with no error page at all, since
+the app had no `error.tsx`, `global-error.tsx`, or `not-found.tsx`. Now:
+
+- `app/layout.tsx` catches a `buildNavTree(await getCatalog())` failure and
+  renders an **empty nav tree** instead of throwing. See the trade-off this
+  implies for ISR pages, spelled out in a comment there: a background
+  regeneration that throws keeps serving the last good cached page, while one
+  that degrades (this catch) gets cached as the new "good" page — but that
+  only matters for a page whose own body needs nothing further from the
+  catalog. `app/[medium]/page.tsx` and `app/[medium]/[collection]/page.tsx`
+  both fetch the catalog again for their own content, so the SAME outage still
+  throws there and ISR still serves their last good render; only `app/page.tsx`
+  and `app/about/page.tsx` (neither needs the catalog at all) could serve a
+  nav-less page for up to one `revalidate` window — a strict improvement over
+  a total outage.
+- `app/error.tsx` is a route-level boundary (catches anywhere under it,
+  without the rest of the app going down) and `app/global-error.tsx` is the
+  one Next requires to render its own `<html>`/`<body>`, for an error thrown
+  by the root layout itself — deliberately dependency-free (inline styles,
+  no shared components) since it has to keep working when the rest just
+  failed. `app/not-found.tsx` replaces Next's bare default 404.
+- `app/admin/comments/page.tsx` and `app/admin/likes/page.tsx` no longer put
+  the catalog in the same `Promise.all` as their DB query — the catalog only
+  supplies a thumbnail + link there (the DB rows carry their own
+  title/public-id), so a catalog failure degrades to a placeholder box and a
+  "catalog unavailable" note instead of a 500. `app/admin/settings/page.tsx`
+  already did this (`embeddingDrift()`'s own try/catch); `app/admin/login`
+  never touches the catalog.
+
 ---
 
 ## 8. Auth & trust boundaries

@@ -54,14 +54,26 @@ export default async function CommentLogPage({
   // empty page or erroring.
   const page = Math.min(parsePage(rawPage), pageCount);
 
-  const [inquiries, index] = await Promise.all([
+  // The catalog only supplies a thumbnail + link (every inquiry already
+  // carries its own snapshotted artworkTitle) — a Cloudinary outage must not
+  // take the comment log down with it (tech debt 1.4). Run it alongside the
+  // DB query for latency, but `.catch` it separately: if it rejects, this
+  // page still renders from the database alone, just without thumbnails or
+  // deep links.
+  const [inquiries, indexResult] = await Promise.all([
     prisma.inquiry.findMany({
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
-    getArtworkIndex(),
+    getArtworkIndex().catch((err) => {
+      console.error("[admin/comments] catalog unavailable:", err);
+      return null;
+    }),
   ]);
+  const catalogUnavailable = indexResult === null;
+  const index: Awaited<ReturnType<typeof getArtworkIndex>> =
+    indexResult ?? new Map();
 
   return (
     <div className="mx-auto max-w-[760px] px-5 py-8">
@@ -73,6 +85,12 @@ export default async function CommentLogPage({
           ? "No inquiries yet."
           : `${total} inquir${total === 1 ? "y" : "ies"} · page ${page} of ${pageCount}`}
       </p>
+      {catalogUnavailable && (
+        <p className="mt-1 text-[13px] text-steel">
+          Catalog unavailable — showing titles and messages only, no
+          thumbnails or links.
+        </p>
+      )}
 
       <ul className="mt-6 flex flex-col gap-3">
         {inquiries.map((inquiry) => {
@@ -86,12 +104,19 @@ export default async function CommentLogPage({
               }`}
             >
               <div className="flex gap-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={imageUrl(inquiry.artworkPublicId, 200)}
-                  alt=""
-                  className="h-16 w-24 shrink-0 rounded-[1px] bg-placeholder object-cover"
-                />
+                {/* No catalog → no Cloudinary thumbnail (the outage that took
+                    the catalog down almost certainly took image delivery down
+                    with it) — a plain placeholder box instead of a broken img. */}
+                {catalogUnavailable ? (
+                  <div className="h-16 w-24 shrink-0 rounded-[1px] bg-placeholder" />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={imageUrl(inquiry.artworkPublicId, 200)}
+                    alt=""
+                    className="h-16 w-24 shrink-0 rounded-[1px] bg-placeholder object-cover"
+                  />
+                )}
                 <div className="min-w-0 grow">
                   <div className="flex items-center gap-2">
                     {isNew && (
@@ -109,7 +134,11 @@ export default async function CommentLogPage({
                     ) : (
                       <span className="truncate text-[15px] font-medium text-ink">
                         {inquiry.artworkTitle}{" "}
-                        <span className="text-ink-faint">(no longer listed)</span>
+                        {!catalogUnavailable && (
+                          <span className="text-ink-faint">
+                            (no longer listed)
+                          </span>
+                        )}
                       </span>
                     )}
                   </div>
