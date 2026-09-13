@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { METADATA_FIELDS, TITLE_KEYS } from "./artworkFields";
-import { apiGet } from "./cloudinaryAdmin";
+import { apiGet, fetchAllPages } from "./cloudinaryAdmin";
 
 /**
  * Cloudinary is the source of truth for ALL artwork structure (Pattern A).
@@ -113,10 +113,22 @@ async function fetchCollection(
   folderPath: string,
   folderName: string
 ): Promise<CatalogCollection> {
-  const data = await apiGet<{ resources?: CloudinaryResource[] }>(
-    `/resources/by_asset_folder?asset_folder=${encodeURIComponent(folderPath)}&max_results=500&context=true`
+  // Follow next_cursor rather than trusting the first 500 to be everything —
+  // the 501st artwork used to just vanish with no error (tech debt 2.2), and
+  // that silence cascaded: getArtworkIndex() wouldn't see it either, so an
+  // inquiry/like against it was rejected as invalid and the embedder pruned
+  // its search vector as "no longer in the catalog."
+  const allResources = await fetchAllPages<
+    { resources?: CloudinaryResource[]; next_cursor?: string },
+    CloudinaryResource
+  >(
+    apiGet,
+    (cursor) =>
+      `/resources/by_asset_folder?asset_folder=${encodeURIComponent(folderPath)}&max_results=500&context=true` +
+      (cursor ? `&next_cursor=${encodeURIComponent(cursor)}` : ""),
+    (page) => ({ items: page.resources ?? [], next_cursor: page.next_cursor })
   );
-  const artworks = (data.resources ?? [])
+  const artworks = allResources
     .map((resource) => {
       const filename =
         resource.display_name ??
@@ -155,12 +167,23 @@ async function fetchCollection(
 }
 
 async function fetchMedium(folder: CloudinaryFolder): Promise<CatalogMedium> {
-  const data = await apiGet<{ folders?: CloudinaryFolder[] }>(
-    `/folders/${encodeURIComponent(folder.path)}?max_results=100`
-  );
-  const subfolders = (data.folders ?? []).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  // Subfolders (collections) of one medium — max_results tops out at 500 for
+  // this endpoint, but the real fix (tech debt 2.2) is following next_cursor
+  // rather than trusting one page to be everything, so a medium's 101st
+  // collection can't silently disappear the way it used to at the old
+  // max_results=100 with no cursor follow.
+  const subfolders = (
+    await fetchAllPages<
+      { folders?: CloudinaryFolder[]; next_cursor?: string },
+      CloudinaryFolder
+    >(
+      apiGet,
+      (cursor) =>
+        `/folders/${encodeURIComponent(folder.path)}?max_results=500` +
+        (cursor ? `&next_cursor=${encodeURIComponent(cursor)}` : ""),
+      (page) => ({ items: page.folders ?? [], next_cursor: page.next_cursor })
+    )
+  ).sort((a, b) => a.name.localeCompare(b.name));
   const collections = await Promise.all(
     subfolders.map((sub) => fetchCollection(sub.path, sub.name))
   );
@@ -173,12 +196,21 @@ async function fetchMedium(folder: CloudinaryFolder): Promise<CatalogMedium> {
 
 /** Full catalog straight from Cloudinary's folder tree. Deduped per render. */
 export const getCatalog = cache(async (): Promise<CatalogMedium[]> => {
-  const data = await apiGet<{ folders?: CloudinaryFolder[] }>(
-    "/folders?max_results=100"
-  );
-  const roots = (data.folders ?? []).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
+  // Root folders (mediums) — this endpoint doesn't document a max_results
+  // parameter at all (just an overall 2000-result ceiling), so next_cursor is
+  // the only lever; following it costs nothing extra when there's only one
+  // page, and is the whole fix when there isn't (tech debt 2.2).
+  const roots = (
+    await fetchAllPages<
+      { folders?: CloudinaryFolder[]; next_cursor?: string },
+      CloudinaryFolder
+    >(
+      apiGet,
+      (cursor) =>
+        `/folders${cursor ? `?next_cursor=${encodeURIComponent(cursor)}` : ""}`,
+      (page) => ({ items: page.folders ?? [], next_cursor: page.next_cursor })
+    )
+  ).sort((a, b) => a.name.localeCompare(b.name));
   return Promise.all(roots.map((folder) => fetchMedium(folder)));
 });
 

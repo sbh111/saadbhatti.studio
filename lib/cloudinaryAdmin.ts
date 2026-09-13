@@ -48,6 +48,50 @@ async function apiGetFresh<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+// Loop guard, not a normal limit: Cloudinary always terminates a paginated read
+// via an absent `next_cursor`, so reaching this means either next_cursor never
+// cleared (a bug here, or an API change) or the catalog has grown far past any
+// size this site is expected to reach. Either way this THROWS instead of
+// quietly stopping — a second, bigger silent truncation would defeat the whole
+// point of tech debt 2.2. 40 pages × 500/page = 20,000 items.
+const MAX_PAGES = 40;
+
+/**
+ * Fetch every page of a Cloudinary Admin API list endpoint that paginates via
+ * `next_cursor` (confirmed present on `/folders`, `/folders/:folder`, and
+ * `/resources/by_asset_folder` — see https://cloudinary.com/documentation/admin_api).
+ * Generic over both the fetcher — pass `apiGet` (cached + tagged, for the public
+ * catalog read) or `apiGetFresh` (no-store, for a read that must see the latest
+ * write) so this helper doesn't have to know about caching at all — and the
+ * response shape, since Cloudinary names the array field differently per
+ * endpoint ("folders" vs "resources"); `extract` pulls `{items, next_cursor}`
+ * out of whatever one page's JSON looks like.
+ *
+ * `buildPath(cursor)` gets `undefined` for the first page and the previous
+ * page's cursor after that — it must URL-encode the cursor itself (via
+ * `encodeURIComponent`), same as every other query value this module builds;
+ * Cloudinary's cursors can contain characters that need escaping.
+ */
+export async function fetchAllPages<Raw, Item>(
+  fetchPage: (path: string) => Promise<Raw>,
+  buildPath: (cursor: string | undefined) => string,
+  extract: (page: Raw) => { items: Item[]; next_cursor?: string }
+): Promise<Item[]> {
+  const all: Item[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const { items, next_cursor } = extract(await fetchPage(buildPath(cursor)));
+    all.push(...items);
+    if (!next_cursor) return all;
+    cursor = next_cursor;
+  }
+  throw new Error(
+    `Cloudinary pagination did not terminate within ${MAX_PAGES} pages ` +
+      `(${all.length} item(s) collected) — either next_cursor never cleared or ` +
+      `the catalog has grown far beyond any expected size.`
+  );
+}
+
 /** Cloudinary context strings are pipe-delimited key=value pairs. */
 function escapeContext(value: string): string {
   return value.replace(/([=|])/g, "\\$1");
@@ -185,15 +229,20 @@ export async function reorderCollection(
   orderedPublicIds: string[]
 ): Promise<ReorderResult> {
   try {
-    // Fresh (uncached) read of the live folder membership + current filenames.
-    const data = await apiGetFresh<{
-      resources?: { public_id: string; display_name?: string }[];
-    }>(
-      `/resources/by_asset_folder?asset_folder=${encodeURIComponent(
-        collectionPath
-      )}&max_results=500`
+    // Fresh (uncached) read of the live folder membership + current filenames —
+    // ALL of it, not just the first 500: the stale-check below compares set
+    // membership, so a collection past one page would otherwise misfire as
+    // "stale" for every asset past the 500th (tech debt 2.2).
+    const resources = await fetchAllPages<
+      { resources?: { public_id: string; display_name?: string }[]; next_cursor?: string },
+      { public_id: string; display_name?: string }
+    >(
+      apiGetFresh,
+      (cursor) =>
+        `/resources/by_asset_folder?asset_folder=${encodeURIComponent(collectionPath)}&max_results=500` +
+        (cursor ? `&next_cursor=${encodeURIComponent(cursor)}` : ""),
+      (page) => ({ items: page.resources ?? [], next_cursor: page.next_cursor })
     );
-    const resources = data.resources ?? [];
 
     // Stale check: if the live public_id set differs from what was staged (an
     // asset was added/removed since staging), refuse — bulk renames are
