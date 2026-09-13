@@ -41,6 +41,15 @@ The build calls the Cloudinary Admin API. Copy `.env.local.example` to `.env.loc
 fill in the API key/secret from the Cloudinary dashboard (Settings → API Keys). Add the
 same two variables in Vercel: Project → Settings → Environment Variables.
 
+### CI
+
+`.github/workflows/ci.yml` runs lint, typecheck, tests, and `next build` on every push
+and PR. The build step needs the same Cloudinary credentials as above — add
+`CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` as **repository secrets** (Settings →
+Secrets and variables → Actions) or the workflow's build step will fail. `DATABASE_URL`/
+`DIRECT_URL` are hardcoded to an unreachable placeholder in the workflow itself — nothing
+in the build ever queries the database, so no database secret is needed (or wanted) in CI.
+
 ### Hero & headshot — local files
 
 The landing hero and about-page headshot are served straight from the repo, not
