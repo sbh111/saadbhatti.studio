@@ -98,8 +98,10 @@ opaque reference and a display snapshot.
 
 Root files worth knowing: `proxy.ts` (the middleware — see §8), `docker-compose.yml`
 (local Postgres, plus the `streaming` and `embedding` profiles), `next.config.ts`
-(38 lines — ships the ONNX native runtime the CLIP text encoder needs at build
-time; see [system-overview.md §8](system-overview.md#8-semantic-image-search-)),
+(ships the ONNX native runtime the CLIP text encoder needs at build time, deriving
+the versioned `.so` name from `onnxruntime-node`'s own `package.json` and asserting
+at config load that every traced file exists — tech debt 2.4; see
+[system-overview.md §8](system-overview.md#8-semantic-image-search-)),
 `postcss.config.mjs` (Tailwind v4 entry point), `tsconfig.json` (defines the
 `@/*` → project-root alias used by every import).
 
