@@ -96,7 +96,9 @@ services:
   #   docker compose down
   # Pre-trained CLIP ViT-B/32 weights are baked into the image (same variant the
   # site's JS query encoder uses — model parity). Reads the artwork id list from
-  # the deployed site's admin catalog-index endpoint and writes vectors to Postgres.
+  # the deployed site's /api/catalog-index endpoint (bearer-token authed, not
+  # under /api/admin — a container has no browser session cookie to send) and
+  # writes vectors to Postgres.
   embed:
     build: ./embed
     container_name: sbh-studio-embed
