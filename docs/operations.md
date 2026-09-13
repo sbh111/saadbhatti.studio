@@ -10,6 +10,7 @@ runs. New sections get appended here rather than scattered across READMEs.
 
 1. [Re-indexing search](#1-re-indexing-search)
 2. [Secrets](#2-secrets)
+3. [Backups and restore](#3-backups-and-restore)
 
 ---
 
@@ -207,3 +208,121 @@ alongside those two, such as `PGHOST`, `PGHOST_UNPOOLED`, `PGUSER`, `PGPASSWORD`
 Neon/Vercel dashboard rather than trimmed to what's actually read), they're pure rotation
 surface for no benefit — worth deleting by hand next time that file is touched. `.env.example`
 does not list them, so a fresh `.env` copied from the example never re-introduces them.
+
+---
+
+## 3. Backups and restore
+
+**The asymmetry this section exists to close:** [architecture.md §13](architecture.md#13-invariants--dont-break-these)
+states outright that Cloudinary assets must never be deleted — they're the only copy of
+production artwork. Nothing equivalent has ever been said about Postgres, which holds the
+**only copy of every sales lead** (the `inquiries` table) — and the admin UI hard-deletes a
+row behind a single `window.confirm`, with no soft delete, no trash, no undo (see
+[schema-design.md §7](schema-design.md#7-growth-retention-and-known-issues)). Treat that
+plainly: a fat-fingered delete, or a bug in the delete path, is unrecoverable without one of
+the two mechanisms below.
+
+### What Neon provides — point-in-time restore
+
+Every Neon project keeps a rolling history of WAL changes and can restore to any point (or
+LSN) inside that window, via the Console, the `neon` CLI (`neon branches restore <target>
+<source>@<timestamp>`), or the API. Mechanically it's branch-based: Neon creates a new branch
+at the target point in time, swaps compute onto it (the connection string doesn't change),
+and renames the old branch to a timestamped backup name rather than deleting it outright — so
+a restore-gone-wrong is itself recoverable.
+
+**The retention window is plan-dependent and controlled per-project** (Console → Settings →
+Instant restore). As of this writing Neon's published defaults/maximums are roughly: Free —
+6 hours (also capped at 1 GB of history); Launch — 1 day default, up to 7 days; Scale — 1 day
+default, up to 30 days. **Don't trust those numbers blindly** — Neon changes plans and limits;
+confirm the actual window for this project in the Console before relying on it, and widen it
+if a day or two isn't enough runway to notice a bad delete.
+
+**How to restore:**
+
+1. Console → the project → **Backup & Restore** (or **Instant restore**) → pick a timestamp
+   (or LSN) on the branch that took the damage.
+2. Neon branches from that point, swaps compute onto the new branch, and renames the old one
+   to `<branch>_old_<timestamp>` — nothing is destroyed, so you can compare or re-restore if
+   the first choice of timestamp was wrong.
+3. The connection string Vercel already has keeps working (same branch name, new underlying
+   data) — no redeploy needed purely for the restore itself.
+4. Only **root** branches support PITR; if this project ever branches Postgres for previews or
+   staging, restore the root, not a child branch.
+
+This covers "restore the whole database to five minutes before the bad thing happened." It
+does **not** cover "get me last Tuesday's data as a separate copy to inspect while production
+keeps running on today's data" — for that, or for a copy outside Neon's control plane
+entirely, use the logical backup below.
+
+### An independent logical backup — `scripts/backup-db.sh`
+
+A second, deliberately low-tech line of defense: a plain `pg_dump` custom-format file, on disk
+outside the repo, restorable into any Postgres (Neon or otherwise) — useful if Neon itself is
+ever unavailable, misconfigured, or if a restore needs to be inspected without touching the
+live branch.
+
+```bash
+BACKUP_DATABASE_URL='<Neon DIRECT (non-pooled) URL>' scripts/backup-db.sh
+# optional second location: scripts/backup-db.sh /path/outside/the/repo
+```
+
+- **Requires `BACKUP_DATABASE_URL`** — the script refuses to run without it (no silent
+  fallback to some default that could be production).
+- **Use the DIRECT/unpooled URL, never the pooled `DATABASE_URL`.** `pg_dump` holds one
+  transaction open for the whole dump; that's a bad fit for PgBouncer's transaction-pooling
+  mode, the same reasoning `prisma migrate` already follows (see
+  [schema-design.md §8](schema-design.md#8-operations)).
+- **Writes outside the repo by default** (`$HOME/backups/saadbhatti-studio`, override with
+  `$BACKUP_DIR` or a positional arg) — a backup that lives in the working tree is one
+  `git clean -fdx` away from vanishing with the code it was meant to survive.
+- **Never echoes the connection string** — only the output path and file size are logged.
+- Output is timestamped and custom-format (`-Fc`): compressed, and restorable selectively.
+
+**Restoring from a dump:**
+
+```bash
+# Inspect what's in it first (no writes):
+pg_restore --list saadbhatti-studio-<timestamp>.dump
+
+# Full restore into an EMPTY target database (see the pgvector note below):
+pg_restore --clean --if-exists --no-owner --no-privileges \
+  -d '<target Postgres URL>' saadbhatti-studio-<timestamp>.dump
+
+# Restore just one table (e.g. to recover inquiries without touching everything else):
+pg_restore --no-owner --no-privileges -t inquiries \
+  -d '<target Postgres URL>' saadbhatti-studio-<timestamp>.dump
+```
+
+**pgvector requirement.** `artwork_embeddings.embedding` is a `vector(512)` column, and the
+`vector` extension must exist in the target database *before* the restore runs — the same
+`CREATE EXTENSION IF NOT EXISTS vector` migration 5 already applies for a normal `prisma
+migrate deploy`. Restoring into a brand-new Postgres without the extension installed first
+fails on that table with "type vector does not exist."
+
+### Restore-drill checklist (do this periodically, not just when something breaks)
+
+A backup nobody has ever restored is a hypothesis, not a safeguard. Periodically (a quarterly
+cadence is a reasonable default for a site this size — tune to how fast the `inquiries` table
+actually grows):
+
+1. Run `scripts/backup-db.sh` against production (the DIRECT URL) and confirm the dump file
+   size looks sane compared to last time.
+2. Spin up a scratch Postgres (local Docker is fine) with the `vector` extension available —
+   `pgvector/pgvector:pg16`, not the plain `postgres:16-alpine` image this repo's local compose
+   currently uses (see tech-debt 1.2).
+3. `pg_restore` the dump into it, end to end, with no manual patching.
+4. Spot-check: row counts per table roughly match Neon; a known recent inquiry is present with
+   the right `artworkPublicId`/`email`; a `SELECT ... <=> ...` query against
+   `artwork_embeddings` runs without a missing-extension error.
+5. Separately, exercise Neon's PITR at least once against a **non-production** branch (Neon
+   supports branching for exactly this) — restoring a scratch branch to an earlier point and
+   confirming the data at that point looks right — so the first time that button is pressed
+   for real isn't also the first time it's ever been tried.
+6. Note the date and outcome somewhere durable (this file, or wherever the owner already
+   tracks operational tasks) so "when did we last verify this" has an answer.
+
+**Recommended cadence, stated plainly:** run `scripts/backup-db.sh` on a schedule (weekly is a
+reasonable starting point — inquiries are the only unrecoverable data and this site's write
+volume is low) in addition to leaning on Neon's PITR for the common case, and run the full
+restore drill above at least once a quarter.
