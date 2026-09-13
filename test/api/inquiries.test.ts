@@ -75,23 +75,34 @@ describe("POST /api/inquiries", () => {
     isRateLimited.mockReset().mockResolvedValue(false);
   });
 
-  it("honeypot: returns 200 and touches nothing else", async () => {
+  it("honeypot: under the limit, returns 200 and touches nothing else", async () => {
     const res = await POST(req({ ...validBody, website: "http://spam.example" }));
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ ok: true });
-    expect(isRateLimited).not.toHaveBeenCalled();
+    // The limiter IS consulted (and so counts this request) — only the db
+    // write, catalog lookup, and email are skipped.
+    expect(isRateLimited).toHaveBeenCalledTimes(1);
     expect(getArtworkIndex).not.toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("invalid fields: 400 before the limiter is even checked", async () => {
+  it("honeypot: over the limit, 429 like any other submission — no bypass", async () => {
+    isRateLimited.mockResolvedValue(true);
+    const res = await POST(req({ ...validBody, website: "http://spam.example" }));
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toEqual({ error: "rate_limited" });
+    expect(getArtworkIndex).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("invalid fields: 400 once the request is under the rate limit", async () => {
     const res = await POST(req({ ...validBody, name: "" }));
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({ error: "invalid" });
-    expect(isRateLimited).not.toHaveBeenCalled();
+    expect(isRateLimited).toHaveBeenCalledTimes(1);
   });
 
-  it("over the rate limit: 429 before the catalog lookup", async () => {
+  it("over the rate limit: 429 before the honeypot check or catalog lookup", async () => {
     isRateLimited.mockResolvedValue(true);
     const res = await POST(req(validBody));
     expect(res.status).toBe(429);
