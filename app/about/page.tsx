@@ -40,12 +40,11 @@ export default function AboutMeView() {
             )}
             {site.contact.email && (
               <a
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-1.5 block text-lg text-steel underline-offset-4 hover:underline"
-            >
-              Email - {site.contact.email}
-            </a>
+                href={`mailto:${site.contact.email}`}
+                className="mt-1.5 block text-lg text-steel underline-offset-4 hover:underline"
+              >
+                Email - {site.contact.email}
+              </a>
             )}
           </div>
         </div>
