@@ -443,7 +443,8 @@ connects lazily, which is what lets `next build` succeed with no database at all
 | `RESEND_API_KEY` / `INQUIRY_NOTIFY_FROM` / `INQUIRY_NOTIFY_TO` | — | ✓ | ✓ | `mail.ts` (best-effort — unset just skips the send) |
 | `EVENT_COLLECTOR_URL` / `EVENT_INGEST_TOKEN` | — | ✓ | ✓ (+ EC2 `deploy/.env`) | `collector.ts` (send) / `collector/main.py` (check) |
 | `CATALOG_INDEX_TOKEN` | — | ✓ | ✓ | `app/api/catalog-index/route.ts` + the embedder |
-| `EMBED_TOKEN` / `EMBED_DATABASE_URL` / `MODEL_ID` / `MODEL_REVISION` | — | — | embedder env only (`docker-compose.yml`) | `embed/main.py` |
+| `EMBED_TOKEN` / `EMBED_DATABASE_URL` | — | — | embedder env only (`docker-compose.yml`) | `embed/main.py` |
+| `MODEL_ID` / `MODEL_REVISION` | — | — | embedder env only (`docker-compose.yml`) | `embed/model_pin.py` (imported by `embed/main.py`; the Dockerfile bakes the pin from this same file) |
 | `INGEST_DOMAIN` | — | — | EC2 `deploy/.env` only | `deploy/compose.prod.yml` (Caddy TLS) |
 | `KAFKA_BOOTSTRAP` / `KAFKA_TOPIC` | — | — | collector env, defaulted | `collector/main.py` |
 

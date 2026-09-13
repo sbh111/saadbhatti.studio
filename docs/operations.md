@@ -163,7 +163,8 @@ sync — miss one after a rotation and that copy is now wrong.
 | `INGEST_DOMAIN` | EC2 `deploy/.env` only | `deploy/compose.prod.yml` (Caddy) | Caddy can't get/renew a TLS cert, or the collector is unreachable at the expected hostname. Not shared with Vercel. |
 | `EMBED_TOKEN` | Embedder env (`docker-compose.yml`, local default `sbh_local_embed`) | `embed/main.py` `_require_token()` — protects `/reindex` | Caller gets a 401 from the embedder. Local-only concern day to day; set a real value before ever exposing the embedder beyond localhost. |
 | `EMBED_DATABASE_URL` | Embedder env — local default is the compose `db` container; a production refresh sets it ad hoc to Neon's DIRECT URL | `embed/main.py` — writes vectors | `/reindex` fails loudly at the "database" stage. Not a standing secret — supplied per invocation. |
-| `MODEL_ID` / `MODEL_REVISION` / `CLOUDINARY_CLOUD_NAME` / `LOG_LEVEL` | Embedder env, all defaulted in `docker-compose.yml` | `embed/main.py` | Non-secret configuration, not credentials. |
+| `MODEL_ID` / `MODEL_REVISION` | Embedder env, defaulted in `embed/model_pin.py` (also baked into the image at build time — see the Dockerfile) | `embed/model_pin.py`, imported by `embed/main.py` | Non-secret configuration, not credentials. |
+| `CLOUDINARY_CLOUD_NAME` / `LOG_LEVEL` | Embedder env, all defaulted in `docker-compose.yml` | `embed/main.py` | Non-secret configuration, not credentials. |
 | `KAFKA_BOOTSTRAP` / `KAFKA_TOPIC` | Collector env, defaulted in `docker-compose.yml` / `deploy/compose.prod.yml` | `collector/main.py` | Non-secret configuration. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `docker-compose.yml` (`db` service), hardcoded in the file | Local Postgres container only | Local-dev only — the comment next to it already says "never a real secret". |
 
