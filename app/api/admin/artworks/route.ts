@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import { META_KEYS } from "@/lib/catalog";
 import { reorderCollection, updateArtworkContext } from "@/lib/cloudinaryAdmin";
+import { CATALOG_CACHE_TAG } from "@/lib/constants";
 
 interface EditPayload {
   publicId: string;
@@ -80,7 +81,7 @@ export async function POST(request: NextRequest) {
 
   const savedEdits = edits.length - failedEdits.length;
   if (savedEdits > 0 || savedReorders > 0) {
-    revalidateTag("catalog", "max");
+    revalidateTag(CATALOG_CACHE_TAG, "max");
     revalidatePath("/", "layout");
   }
 

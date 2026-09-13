@@ -85,7 +85,7 @@ export default function AppShell({
         </header>
 
         {/* Desktop sidebar */}
-        <aside className="hidden w-[236px] shrink-0 border-r border-hairline bg-panel desk:block">
+        <aside className="hidden w-[var(--sidebar-width)] shrink-0 border-r border-hairline bg-panel desk:block">
           <SidebarContent tree={navTree} />
         </aside>
 

@@ -5,11 +5,18 @@ import { content } from "@/lib/content";
 import { getCatalog } from "@/lib/catalog";
 import { buildNavTree } from "@/lib/nav";
 import { imageUrl } from "@/lib/cloudinary";
+import { SITE_ORIGIN } from "@/lib/constants";
 import AppShell from "@/components/AppShell";
 import AdminProvider from "@/components/AdminProvider";
 import "./globals.css";
 
-/** Re-check Cloudinary for new/changed artwork at most hourly */
+/**
+ * Re-check Cloudinary for new/changed artwork at most hourly. Must stay a
+ * static literal (Next reads route segment config at build time and can't
+ * resolve an import here) — kept in sync by hand with
+ * CATALOG_REVALIDATE_SECONDS in lib/constants.ts, which the fetch-level cache
+ * in lib/cloudinaryAdmin.ts uses for the same window.
+ */
 export const revalidate = 3600;
 
 const inter = Inter({
@@ -25,7 +32,7 @@ const pressStart = Press_Start_2P({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://saadbhatti.studio"),
+  metadataBase: new URL(SITE_ORIGIN),
   title: content.site.title,
   description: content.site.intro,
   openGraph: {

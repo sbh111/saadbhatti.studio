@@ -1,4 +1,5 @@
 import { CLOUD_NAME } from "./cloudinary";
+import { CATALOG_CACHE_TAG, CATALOG_REVALIDATE_SECONDS } from "./constants";
 
 /**
  * Low-level authenticated Cloudinary Admin API client — everything that can
@@ -19,11 +20,11 @@ function authHeader(): string {
   return `Basic ${Buffer.from(`${key}:${secret}`).toString("base64")}`;
 }
 
-/** Cached read used by the public catalog; invalidated via revalidateTag("catalog"). */
+/** Cached read used by the public catalog; invalidated via revalidateTag(CATALOG_CACHE_TAG). */
 export async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     headers: { Authorization: authHeader() },
-    next: { revalidate: 3600, tags: ["catalog"] },
+    next: { revalidate: CATALOG_REVALIDATE_SECONDS, tags: [CATALOG_CACHE_TAG] },
   });
   if (!response.ok) {
     throw new Error(

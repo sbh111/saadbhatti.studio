@@ -31,7 +31,7 @@ export default function CollectionCover({
       <div
         className="mx-auto mt-3 max-w-full"
         style={{
-          width: `min(100%, calc(${collection.coverAspect} * 66vh))`,
+          width: `min(100%, calc(${collection.coverAspect} * var(--fit-height)))`,
         }}
       >
         <div className="text-lg font-medium text-ink">{collection.name}</div>

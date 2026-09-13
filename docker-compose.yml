@@ -117,6 +117,8 @@ services:
       # just http://localhost:3000/api/catalog-index.
       # A remote default MUST use the CANONICAL host (www): the apex 308-redirects
       # to www, and httpx drops the Authorization header across an origin change.
+      # Same fact as SITE_ORIGIN in lib/constants.ts, which the Next app reads
+      # from — this file can't import it, so keep the host in sync by hand.
       CATALOG_INDEX_URL: ${CATALOG_INDEX_URL:-https://www.saadbhatti.studio/api/catalog-index}
       CATALOG_INDEX_TOKEN: ${CATALOG_INDEX_TOKEN:-}
       # Prefer the DIRECT (non-pooled) Neon URL for a real refresh; defaults to the
