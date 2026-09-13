@@ -362,6 +362,23 @@ idempotent, so retrying heals a partial apply. A reorder whose collection change
 underneath is rejected as **stale** rather than merge-guessed — bulk renames are
 destructive.
 
+**In-flight edits don't get lost either (tech debt 1.5).** `saveAll` snapshots
+exactly what it's sending, then on response computes what's still staged by
+reading the map fresh (post-response, picking up anything staged in this or
+another tab meanwhile) and dropping an id only if it was sent, didn't fail,
+**and** its current value still matches exactly what was sent — see
+`pruneSaved` in `lib/adminStaging.ts`. An entry the admin kept editing while
+the request was in flight is a genuinely newer, never-sent change, so it stays
+staged even though its id came back as saved. The caption inputs are also
+`disabled` for the duration (`saving`, exposed through `EditContext` — it
+flips at most twice per save, so it doesn't add keystroke-level churn to a
+context every caption consumes), closing the window where a keystroke could
+race the request in the first place. Separately, each caption re-seeds its
+inputs not only on `syncSignal` but whenever its own `contextTitle`/
+`metaFields` props change — closing a race where `saveAll` bumps `syncSignal`
+and calls `router.refresh()` in the same tick, but the refresh (and the fresh
+props it delivers) arrives later.
+
 ---
 
 ## 10. The three write paths

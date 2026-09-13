@@ -46,3 +46,35 @@ export function applyStagingChange<T>(
   else delete next[key];
   return next;
 }
+
+/**
+ * What should remain staged after a save-all response comes back (tech debt
+ * 1.5). `saveAll` used to snapshot the staged map, then unconditionally
+ * replace it with only the failures — wiping any entry someone (this tab or
+ * another) edited again while the request was in flight, even though that
+ * newer edit was never sent and never saved.
+ *
+ * An id is safe to drop only if it was SENT, is NOT reported as failed, AND
+ * its value in `current` (read fresh, post-response — the same
+ * read-merge-write discipline as `applyStagingChange`) still matches exactly
+ * what was sent: nobody changed it again since the snapshot. Anything that
+ * failed, or was edited again since, stays staged — `current` is the source
+ * of truth for what's staged, `sent` only for what to compare against.
+ */
+export function pruneSaved<T>(
+  current: Record<string, T>,
+  sent: Record<string, T>,
+  failedIds: readonly string[],
+  equal: (a: T, b: T) => boolean
+): Record<string, T> {
+  const failed = new Set(failedIds);
+  const next = { ...current };
+  for (const [id, sentValue] of Object.entries(sent)) {
+    if (failed.has(id)) continue;
+    const currentValue = next[id];
+    if (currentValue !== undefined && equal(currentValue, sentValue)) {
+      delete next[id];
+    }
+  }
+  return next;
+}

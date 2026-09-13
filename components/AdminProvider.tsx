@@ -10,8 +10,8 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Fields } from "@/lib/artworkFields";
-import { applyStagingChange, parseStagingMap } from "@/lib/adminStaging";
+import { FIELD_KEYS, type Fields } from "@/lib/artworkFields";
+import { applyStagingChange, parseStagingMap, pruneSaved } from "@/lib/adminStaging";
 
 /**
  * Client-side admin state for CollectionView: inline metadata editing (1a) and
@@ -47,6 +47,12 @@ interface EditContextValue {
   isAdmin: boolean;
   /** Re-seed signal — bumps after localStorage hydration and after Discard. */
   syncSignal: number;
+  /** True while a bulk save is in flight — captions disable their inputs so
+   * typing can't race the save (tech debt 1.5). Included here (not a new
+   * fourth context) because it only flips twice per save, not per keystroke —
+   * it doesn't add to EditContext's churn profile in any way BarContext's
+   * per-keystroke `dirtyCount` already doesn't. */
+  saving: boolean;
   /** Staged fields for an artwork, if any (used to seed a caption's inputs). */
   getStaged: (publicId: string) => Fields | undefined;
   /** Report an artwork's edited fields, or null when it matches the original. */
@@ -264,6 +270,10 @@ export default function AdminProvider({
     const editEntries = Object.entries(editsRef.current);
     const reorderEntries = Object.entries(orderRef.current);
     if (editEntries.length === 0 && reorderEntries.length === 0) return;
+    // Snapshot of exactly what's being sent, kept for the post-response prune
+    // below — comparing against THIS (not whatever editsRef holds by the time
+    // the response arrives) is what lets an in-flight edit survive (1.5).
+    const sentEdits: Record<string, Fields> = Object.fromEntries(editEntries);
     setSaving(true);
     try {
       const res = await fetch("/api/admin/artworks", {
@@ -288,17 +298,19 @@ export default function AdminProvider({
         failedReorders: { path: string; reason: "stale" | "error" }[];
       };
 
-      // Keep failed edits staged so the count reflects reality.
-      //
-      // NOTE: this still replaces the whole map from a pre-request snapshot
-      // rather than read-merge-writing (tech debt 1.5 — saveAll can wipe an
-      // edit staged, in THIS or another tab, while the request was in
-      // flight). 1.6 only fixes the single-key paths (report/stageOrder); the
-      // snapshot-vs-in-flight-edit race here is 1.5's fix.
-      const remaining: Record<string, Fields> = {};
-      for (const id of failedEdits ?? []) {
-        if (editsRef.current[id]) remaining[id] = editsRef.current[id];
-      }
+      // Prune only what actually saved (tech debt 1.5): read the map fresh
+      // (picks up anything staged in this or another tab since the snapshot
+      // above) and drop an id only if it was sent, didn't fail, AND its
+      // current value still matches exactly what was sent — i.e. nobody
+      // edited it again while the request was in flight. An entry edited
+      // again mid-save is a genuinely newer, never-sent, never-saved change,
+      // so it must stay staged even though its id is also in `sentEdits`.
+      const remaining = pruneSaved(
+        loadEdits(),
+        sentEdits,
+        failedEdits ?? [],
+        (a, b) => FIELD_KEYS.every((k) => a[k] === b[k])
+      );
       editsRef.current = remaining;
       writeEdits(remaining);
 
@@ -331,8 +343,8 @@ export default function AdminProvider({
   }, [recomputeDirty, router]);
 
   const editValue = useMemo<EditContextValue>(
-    () => ({ isAdmin, syncSignal, getStaged, report }),
-    [isAdmin, syncSignal, getStaged, report]
+    () => ({ isAdmin, syncSignal, saving, getStaged, report }),
+    [isAdmin, syncSignal, saving, getStaged, report]
   );
   const orderValue = useMemo<OrderContextValue>(
     () => ({ isAdmin, orderVersion, getStagedOrder, stageOrder }),
