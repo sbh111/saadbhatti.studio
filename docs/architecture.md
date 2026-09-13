@@ -128,6 +128,7 @@ survive an artwork being renamed, reordered, or deleted.
 | File | Role |
 |---|---|
 | `catalog.ts` | **The domain model.** Turns Cloudinary's folder tree into `CatalogMedium[] → CatalogCollection[] → CatalogArtwork[]`. Also exposes `getArtworkIndex()` (flat `public_id → artwork + location` map). |
+| `artworkFields.ts` | Client-safe single source of truth for the title's and each metadata field's context read chain (`TITLE_KEYS`, `METADATA_FIELDS`, `FIELD_KEYS`). `catalog.ts`, the admin artworks route, `AdminProvider.tsx`, and `ArtworkCaption.tsx` all derive from it — adding a field is a one-line change here (tech-debt.md 3.1). |
 | `cloudinaryAdmin.ts` | Low-level authenticated Admin API client. Everything that reads or **mutates** Cloudinary. Holds the API key/secret. |
 | `cloudinary.ts` | Pure URL builders for image delivery (`imageUrl`, `imageSrcSet`, `blurUrl`) + `CLOUD_NAME`. No secrets — safe anywhere. |
 | `content.ts` | Types + loads `content.json`. |
@@ -160,7 +161,7 @@ point. If you need a constant on both sides, it goes in `inquiryLimits.ts`.
 | Membership | Assets whose `asset_folder` is `<medium>/<collection>`. |
 | Order | `localeCompare` on `display_name` — hence the `NN-` prefixes. |
 | Name | Context `Title Name` → `caption` → prettified filename (strips `NN-`, dashes → spaces). |
-| Metadata | Context keys `Film`, `Medium`, `Dimensions`, `Year` (`META_KEYS`), whichever exist, in that order. |
+| Metadata | Context keys `Film`, `Medium`, `Dimensions`, `Year` (`METADATA_FIELDS` in `lib/artworkFields.ts`), whichever exist, in that order. |
 | Cover | First artwork. |
 | Aspect | Cloudinary `width/height` — reserves layout space to avoid shift. |
 
@@ -485,8 +486,9 @@ The Phase D substrate was built to be reused:
 - **A new public write endpoint** — the rate-limit → honeypot → validate →
   catalog-check → insert pipeline in `app/api/inquiries/route.ts` is the
   template (the limit comes first so nothing, honeypot included, bypasses it).
-- **A new artwork metadata field** — add to `META_KEYS` in `catalog.ts` and
-  `FIELD_KEYS` in `AdminProvider.tsx`.
+- **A new artwork metadata field** — add one entry to `METADATA_FIELDS` in
+  `lib/artworkFields.ts`; the catalog read side, the admin form, and the
+  admin save payload all derive from it (tech-debt.md 3.1).
 
 ---
 

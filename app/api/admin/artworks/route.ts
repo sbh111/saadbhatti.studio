@@ -1,7 +1,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/auth";
-import { META_KEYS, TITLE_KEYS } from "@/lib/catalog";
+import { METADATA_FIELDS, TITLE_KEYS } from "@/lib/artworkFields";
 import {
   reorderCollection,
   updateArtworkContext,
@@ -50,14 +50,15 @@ export async function POST(request: NextRequest) {
   // --- Metadata edits (parallel, as in 1a) ---
   const editResults = await Promise.allSettled(
     edits.map(({ publicId, fields }) => {
-      // Each field carries its FULL read chain (TITLE_KEYS / a META_KEYS
-      // entry), not just its canonical key — clearing a field has to delete
-      // every alias in its chain, or an old one (e.g. a stray `caption`)
-      // resurfaces through the catalog's read-side fallback (tech debt 3.2).
-      // See lib/cloudinaryAdmin.ts's mergeContext for the clear-vs-set logic.
+      // Each field carries its FULL read chain (TITLE_KEYS / a
+      // METADATA_FIELDS entry, both from lib/artworkFields.ts), not just its
+      // canonical key — clearing a field has to delete every alias in its
+      // chain, or an old one (e.g. a stray `caption`) resurfaces through the
+      // catalog's read-side fallback (tech debt 3.2). See
+      // lib/cloudinaryAdmin.ts's mergeContext for the clear-vs-set logic.
       const context: ContextFieldUpdate[] = [
         { keys: TITLE_KEYS, value: fields.title ?? "" },
-        ...META_KEYS.map(([label, ...keys]) => ({
+        ...METADATA_FIELDS.map(({ label, keys }) => ({
           keys,
           value: fields[label] ?? "",
         })),

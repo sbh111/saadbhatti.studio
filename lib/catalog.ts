@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { METADATA_FIELDS, TITLE_KEYS } from "./artworkFields";
 import { apiGet } from "./cloudinaryAdmin";
 
 /**
@@ -13,8 +14,10 @@ import { apiGet } from "./cloudinaryAdmin";
  * - order:       alphabetical by display_name — prefix files 01-, 02-, …
  * - name:        contextual metadata "Title Name" (falls back to the built-in
  *                Title/caption, then to a prettified display_name)
- * - metadata:    any of the contextual keys Film, Medium, Dimensions, Year —
- *                whichever are present render, in that order
+ * - metadata:    whichever of lib/artworkFields.ts's METADATA_FIELDS are
+ *                present render, in that order — the field list (and each
+ *                field's alias chain) is defined there ONCE and shared with
+ *                the admin form and the admin write path (tech debt 3.1).
  *
  * A medium with no artworks renders the WIP view. Nothing here is
  * medium-specific: add any new root folder in Cloudinary and it appears.
@@ -66,29 +69,6 @@ interface CloudinaryFolder {
   path: string;
 }
 
-/**
- * All context keys the title is read from, in read-priority order — every
- * historical "spelling" of the same logical field. The first entry is
- * canonical: the only key the admin write path ever sets. Clearing the title
- * must delete every key here, or an old alias (e.g. a stray `caption`) would
- * resurface through the fallback below (tech debt 3.2).
- */
-export const TITLE_KEYS: readonly string[] = ["Title Name", "caption", "Title", "title"];
-
-/**
- * Contextual metadata rendered for any medium, in this order, blanks skipped.
- * Each entry is `[label, ...contextKeys]` — the same shape/reasoning as
- * `TITLE_KEYS`: `contextKeys` is that field's full read chain (canonical key
- * first), so `Film` clearing has to delete both `Film` and `film`, not just
- * the canonical one.
- */
-export const META_KEYS: [label: string, ...contextKeys: string[]][] = [
-  ["Film", "Film", "film"],
-  ["Medium", "Medium", "medium"],
-  ["Dimensions", "Dimensions", "dimensions"],
-  ["Year", "Year", "year"],
-];
-
 function contextValue(
   resource: CloudinaryResource,
   ...keys: string[]
@@ -116,7 +96,7 @@ function prettifyFilename(basename: string): string {
 
 function metaFieldsOf(resource: CloudinaryResource): Record<string, string> {
   const fields: Record<string, string> = {};
-  for (const [label, ...keys] of META_KEYS) {
+  for (const { label, keys } of METADATA_FIELDS) {
     const value = contextValue(resource, ...keys);
     if (value) fields[label] = value;
   }
@@ -124,8 +104,8 @@ function metaFieldsOf(resource: CloudinaryResource): Record<string, string> {
 }
 
 function metaLineOf(metaFields: Record<string, string>): string {
-  return META_KEYS.filter(([label]) => metaFields[label])
-    .map(([label]) => `${label}: ${metaFields[label]}`)
+  return METADATA_FIELDS.filter(({ label }) => metaFields[label])
+    .map(({ label }) => `${label}: ${metaFields[label]}`)
     .join(" · ");
 }
 

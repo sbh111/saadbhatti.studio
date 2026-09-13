@@ -131,7 +131,7 @@ which is the join key for every other subsystem.
   width is capped so a tall portrait still leaves its caption on screen.
 
 **Key files:** [lib/catalog.ts](../lib/catalog.ts) · [lib/cloudinary.ts](../lib/cloudinary.ts) ·
-[components/ArtworkImage.tsx](../components/ArtworkImage.tsx)
+[lib/artworkFields.ts](../lib/artworkFields.ts) · [components/ArtworkImage.tsx](../components/ArtworkImage.tsx)
 
 ---
 
@@ -172,7 +172,7 @@ re-render triggers, each feeding a separate context so unrelated components don'
 
 **Key files:** [lib/auth.ts](../lib/auth.ts) · [proxy.ts](../proxy.ts) ·
 [components/AdminProvider.tsx](../components/AdminProvider.tsx) ·
-[lib/cloudinaryAdmin.ts](../lib/cloudinaryAdmin.ts)
+[lib/cloudinaryAdmin.ts](../lib/cloudinaryAdmin.ts) · [lib/artworkFields.ts](../lib/artworkFields.ts)
 
 ---
 

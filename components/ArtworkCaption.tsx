@@ -2,16 +2,13 @@
 
 import { useEffect, useState } from "react";
 import {
+  fieldsFromContext,
   FIELD_KEYS,
-  useArtworkEdit,
-  type Fields,
+  METADATA_FIELDS,
   type FieldKey,
-} from "./AdminProvider";
-
-// The metadata fields (everything except the title) — same labels the catalog
-// reads from Cloudinary context, kept here so this client file needn't import
-// the server-only catalog module.
-const META_LABELS = FIELD_KEYS.filter((k) => k !== "title") as FieldKey[];
+  type Fields,
+} from "@/lib/artworkFields";
+import { useArtworkEdit } from "./AdminProvider";
 
 /**
  * The name + metadata under an artwork on CollectionView. Logged out (or when
@@ -34,13 +31,9 @@ export default function ArtworkCaption({
 }) {
   const { isAdmin, syncSignal, getStaged, report } = useArtworkEdit();
 
-  const original: Fields = {
-    title: contextTitle,
-    Film: metaFields.Film ?? "",
-    Medium: metaFields.Medium ?? "",
-    Dimensions: metaFields.Dimensions ?? "",
-    Year: metaFields.Year ?? "",
-  };
+  // Derived from lib/artworkFields.ts's METADATA_FIELDS — adding a field
+  // there means this can't silently miss it (tech debt 3.1).
+  const original: Fields = fieldsFromContext(contextTitle, metaFields);
 
   const [vals, setVals] = useState<Fields>(original);
 
@@ -94,14 +87,16 @@ export default function ArtworkCaption({
         }`}
       />
       <div className="mt-2 grid grid-cols-2 gap-2">
-        {META_LABELS.map((key) => (
-          <label key={key} className="block text-sm text-ink-muted">
-            {key}
+        {METADATA_FIELDS.map(({ label }) => (
+          <label key={label} className="block text-sm text-ink-muted">
+            {label}
             <input
-              value={vals[key]}
-              onChange={(e) => update(key, e.target.value)}
+              value={vals[label as FieldKey]}
+              onChange={(e) => update(label as FieldKey, e.target.value)}
               className={`mt-0.5 ${inputClasses} ${
-                vals[key] !== original[key] ? "border-steel" : "border-hairline"
+                vals[label as FieldKey] !== original[label as FieldKey]
+                  ? "border-steel"
+                  : "border-hairline"
               }`}
             />
           </label>

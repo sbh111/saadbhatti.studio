@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { Fields } from "@/lib/artworkFields";
 
 /**
  * Client-side admin state for CollectionView: inline metadata editing (1a) and
@@ -30,15 +31,13 @@ import {
  *    above (Bar bumps per keystroke, Edit/Order bump on sync/drop).
  */
 
-export const FIELD_KEYS = [
-  "title",
-  "Film",
-  "Medium",
-  "Dimensions",
-  "Year",
-] as const;
-export type FieldKey = (typeof FIELD_KEYS)[number];
-export type Fields = Record<FieldKey, string>;
+// The field list itself lives in lib/artworkFields.ts (client-safe, no
+// server import) so this module, ArtworkCaption, and the admin route all
+// derive from ONE place — adding a field there is now a one-line change
+// (tech debt 3.1). Re-exported here so existing imports of FIELD_KEYS/
+// FieldKey/Fields from this module don't need to change.
+export { FIELD_KEYS } from "@/lib/artworkFields";
+export type { FieldKey, Fields } from "@/lib/artworkFields";
 
 const LS_KEY = "sbh_admin_edits";
 const LS_ORDER_KEY = "sbh_admin_order";

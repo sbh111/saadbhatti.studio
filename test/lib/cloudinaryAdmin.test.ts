@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { mergeContext, type ContextFieldUpdate } from "@/lib/cloudinaryAdmin";
+import { METADATA_FIELDS, TITLE_KEYS } from "@/lib/artworkFields";
 
 // Pure logic only — no fetch/Cloudinary involved, and none should be: this
 // pins the read-modify-write merge behind updateArtworkContext (tech debt
-// 3.2) without touching the network.
-
-const TITLE_KEYS = ["Title Name", "caption", "Title", "title"] as const;
-const FILM_KEYS = ["Film", "film"] as const;
+// 3.2) without touching the network. Chains come from lib/artworkFields.ts
+// (the single source of truth, tech debt 3.1) rather than being retyped here.
+const FILM_KEYS = METADATA_FIELDS.find((f) => f.label === "Film")!.keys;
 
 describe("mergeContext", () => {
   it("clearing a field deletes every key in its chain, not just the canonical one", () => {
@@ -44,7 +44,7 @@ describe("mergeContext", () => {
     const fields: ContextFieldUpdate[] = [
       { keys: TITLE_KEYS, value: "" }, // clear title
       { keys: FILM_KEYS, value: "Portra 400" }, // set film (canonical only)
-      { keys: ["Medium", "medium"], value: "" }, // clear medium
+      { keys: METADATA_FIELDS.find((f) => f.label === "Medium")!.keys, value: "" }, // clear medium
     ];
 
     const merged = mergeContext(current, fields);
