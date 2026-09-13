@@ -14,9 +14,33 @@ import type { PreTrainedModel, PreTrainedTokenizer } from "@huggingface/transfor
  * Runtime-agnostic on purpose: no Vercel-only APIs, so it works in a serverless
  * function today and in a long-lived Node container later (where the one-time load
  * below stops mattering because the process stays warm).
+ *
+ * COLD-START COST: transformers.js has no default quantization on Node (only
+ * the wasm backend defaults to int8 — see DEFAULT_DEVICE_DTYPE_MAPPING in
+ * @huggingface/transformers), so every cold instance downloads the fp32 text
+ * tower from the HuggingFace CDN: ~242 MB for onnx/text_model.onnx alone, plus
+ * a few MB of tokenizer files (measured against the pinned revision below).
+ * Quantizing would shift the query-vector space out of parity with the
+ * image vectors (same reasoning as the MODEL PARITY note above), so it's not
+ * an option here — and baking that fp32 weight into the function alongside
+ * onnxruntime-node (~43 MB, see next.config.ts) would exceed Vercel's 250 MB
+ * unzipped function limit on its own. Documented as an accepted cold-start
+ * dependency on the HF CDN in docs/system-overview.md §8 and
+ * docs/operations.md §1; the longer-term fix is moving query encoding into a
+ * warm, long-lived container (see "Escape hatches" in system-overview.md §8),
+ * consistent with this project's direction of containerizing services.
  */
 
 const MODEL_ID = "Xenova/clip-vit-base-patch32";
+// Pinned 2026-09-13 to the repo's current HEAD commit (checked via
+// https://huggingface.co/api/models/Xenova/clip-vit-base-patch32). Previously
+// unpinned (implicit "main"): if upstream ever repushes this repo, an unpinned
+// load would silently start returning a DIFFERENT text tower than whatever
+// PyTorch checkpoint embed/main.py used for the stored image vectors — no
+// error, just query vectors that no longer line up with the image space
+// (tech debt 2.3). Changing this value (or embed/main.py's MODEL_REVISION)
+// requires re-embedding every artwork with the embedder afterward.
+const MODEL_REVISION = "d15189d7028b43f1d3e65039190477f6af591c2a";
 export const EMBED_DIM = 512;
 const CACHE_DIR = "/tmp/hf-cache"
 
@@ -37,8 +61,14 @@ async function getEncoder(): Promise<TextEncoder> {
       );
       // Load ONLY the text tower — the vision tower never runs in the site.
       const [tokenizer, model] = await Promise.all([
-        AutoTokenizer.from_pretrained(MODEL_ID, {cache_dir: CACHE_DIR}),
-        CLIPTextModelWithProjection.from_pretrained(MODEL_ID, {cache_dir: CACHE_DIR}),
+        AutoTokenizer.from_pretrained(MODEL_ID, {
+          cache_dir: CACHE_DIR,
+          revision: MODEL_REVISION,
+        }),
+        CLIPTextModelWithProjection.from_pretrained(MODEL_ID, {
+          cache_dir: CACHE_DIR,
+          revision: MODEL_REVISION,
+        }),
       ]);
       return { tokenizer, model };
     })().catch((err) => {

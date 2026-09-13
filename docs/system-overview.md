@@ -340,7 +340,16 @@ enforced by baking the model into the embedder image, not by convention.
 Vercel traced the native ONNX addon but not the shared library it `dlopen()`s; the fix had to
 ship four specific files while *excluding* a 327 MB CUDA provider that would have blown the
 250 MB function limit on its own. Locally, Docker 28+ blocks container→host traffic by default,
-so the embedder runs on the host network. Cold starts still pay for loading the model.
+so the embedder runs on the host network. Cold starts still pay for loading the model — and that
+cost is real, not incidental: transformers.js has no default quantization on Node (only its wasm
+backend defaults to int8), so a cold instance downloads the fp32 text tower from the HuggingFace
+CDN, ~242 MB for `onnx/text_model.onnx` alone. Quantizing would shift the query-vector space out
+of parity with the image vectors, so it isn't an option, and baking that weight into the function
+alongside onnxruntime-node's ~43 MB would exceed the 250 MB limit on its own — this is an accepted
+cold-start dependency on the HF CDN, not an oversight. Both sides are pinned to an exact commit SHA
+(dated in [lib/clip.ts](../lib/clip.ts) and [embed/main.py](../embed/main.py)) so upstream can't
+silently swap the weights out from under model parity; that pin has to move in lockstep with a
+re-embed of every artwork if it's ever changed.
 
 **Escape hatches, by design.** Encoding is isolated behind one module, so swapping to a hosted
 embedding API — or moving query encoding into a long-lived container, which would erase cold

@@ -119,6 +119,27 @@ Two signals now catch this instead of leaving it silent:
   non-zero. It degrades to "unavailable" rather than breaking the page if Cloudinary or the
   database can't be reached.
 
+### Model revision pinning
+
+Both halves of CLIP are pinned to an exact commit SHA, not a moving branch, and the two pins
+must always describe the *same* underlying weights (tech debt 2.3):
+
+- **JS text encoder** ([lib/clip.ts](../lib/clip.ts)) — `Xenova/clip-vit-base-patch32` (the ONNX
+  conversion) at `d15189d7028b43f1d3e65039190477f6af591c2a`, pinned 2026-09-13.
+- **Python vision encoder** ([embed/main.py](../embed/main.py)) — `openai/clip-vit-base-patch32`
+  (the original PyTorch weights) at `3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268`, pinned 2026-09-13,
+  baked into the embedder image at build time (see [embed/Dockerfile](../embed/Dockerfile)).
+
+**Changing either pin requires re-embedding every artwork** (this section, above) afterward —
+the whole point of model parity is that both sides describe the same vector space, and a pin
+change is exactly the kind of upstream weight change that breaks it silently otherwise.
+
+Search also has an accepted (not accidental) cold-start dependency on the HuggingFace CDN: with
+no quantization on Node, a cold instance downloads the fp32 text tower (~242 MB) fresh, since
+baking it into the function alongside onnxruntime-node would exceed Vercel's 250 MB limit — see
+[system-overview.md §8](system-overview.md#8-semantic-image-search-) for the full reasoning and
+the longer-term fix (moving query encoding into a warm container).
+
 ---
 
 ## 2. Secrets

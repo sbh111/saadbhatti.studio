@@ -15,15 +15,36 @@ ENV TRANSFORMERS_NO_ADVISORY_WARNINGS=1
 COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir -r requirements.lock
 
-# Pre-download the model at build time (pinned in main.py); ON THE SAME variant the
-# site's JS text encoder uses, so image and query vectors share one space.
-# Vision tower only (CLIPVisionModelWithProjection) — see the comment in
-# main.py above _load_model() for why, and how that was verified safe.
-RUN python -c "from transformers import CLIPProcessor, CLIPVisionModelWithProjection; \
-    CLIPVisionModelWithProjection.from_pretrained('openai/clip-vit-base-patch32'); \
-    CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')"
-
 COPY main.py .
+
+# Pre-download the model at build time, at the SAME pinned MODEL_ID/MODEL_REVISION
+# main.py itself defaults to. The site's JS text encoder (lib/clip.ts) is pinned to
+# a matching revision of a DIFFERENT repo — the ONNX conversion of these same
+# upstream weights — so image and query vectors share one space (tech debt 2.3).
+#
+# The two values are extracted from main.py's own source via `ast` rather than
+# repeated here as literals or threaded through as a build ARG: either of those
+# would be a second place they could drift out of sync with main.py — exactly the
+# bug this fix closes (MODEL_REVISION used to default to "main", so "pinned" was
+# aspirational). Reading them this way can't drift, because there's nothing to
+# keep in sync — it evaluates the same two assignments main.py evaluates at import
+# time, without running the rest of the module (which would swallow a download
+# failure into `_model_error` instead of failing the build: main.py treats a load
+# failure as a runtime 503, not a startup crash — see its comment above
+# _load_model()). Vision tower only (CLIPVisionModelWithProjection) — see the
+# comment in main.py above _load_model() for why, and how that was verified safe.
+RUN python -c "\
+import ast; \
+from transformers import CLIPProcessor, CLIPVisionModelWithProjection; \
+tree = ast.parse(open('main.py').read()); \
+ns = {'os': __import__('os')}; \
+[exec(compile(ast.Module(body=[n], type_ignores=[]), 'main.py', 'exec'), ns) \
+    for n in tree.body if isinstance(n, ast.Assign) \
+    and any(getattr(t, 'id', None) in ('MODEL_ID', 'MODEL_REVISION') for t in n.targets)]; \
+model_id, revision = ns['MODEL_ID'], ns['MODEL_REVISION']; \
+print(f'baking {model_id} @ {revision}'); \
+CLIPVisionModelWithProjection.from_pretrained(model_id, revision=revision); \
+CLIPProcessor.from_pretrained(model_id, revision=revision)"
 
 EXPOSE 8100
 
