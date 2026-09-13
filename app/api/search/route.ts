@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
+import { busy, invalid, rateLimited, unavailable } from "@/lib/http";
 import { clientIpOf, hashIp } from "@/lib/inquiries";
 import {
   isRateLimited,
@@ -25,7 +26,6 @@ import { embedText, EMBED_DIM } from "@/lib/clip";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const invalid = () => NextResponse.json({ error: "invalid" }, { status: 400 });
 const empty = () => NextResponse.json({ results: [] });
 
 // C0 control range + DEL. Built via RegExp string (escapes, not literal bytes).
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
   // Per-IP limit, then global cost ceiling — both before the expensive encode.
   const ipHash = hashIp(clientIpOf(request));
   if (await isRateLimited("search", ipHash, SEARCH_MAX, SEARCH_WINDOW_MS)) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+    return rateLimited();
   }
   if (
     await isRateLimited(
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       SEARCH_GLOBAL_WINDOW_MS
     )
   ) {
-    return NextResponse.json({ error: "busy" }, { status: 503 });
+    return busy();
   }
 
   // The expensive step, last. Await the single shared init (concurrent-safe).
@@ -78,11 +78,11 @@ export async function POST(request: NextRequest) {
     vec = await embedText(query);
   } catch (err) {
     console.error("search: embed failed", err);
-    return NextResponse.json({ error: "unavailable" }, { status: 503 });
+    return unavailable();
   }
   // Guard against a malformed encoder output reaching the SQL cast.
   if (vec.length !== EMBED_DIM || !vec.every((n) => Number.isFinite(n))) {
-    return NextResponse.json({ error: "unavailable" }, { status: 503 });
+    return unavailable();
   }
 
   // pgvector cosine ranking. The vector is our own computed floats, passed as a

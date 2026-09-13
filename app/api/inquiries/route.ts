@@ -2,14 +2,17 @@ import { NextResponse, after, type NextRequest } from "next/server";
 import { EmailStatus } from "@prisma/client";
 import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
-import { clientIpOf, hashIp, isRateLimited } from "@/lib/inquiries";
-import { isRateLimited as rateLimit, DAILY_EMAIL_CAP, DAY_MS } from "@/lib/rateLimit";
+import { invalid, rateLimited, str } from "@/lib/http";
+import { clientIpOf, hashIp } from "@/lib/inquiries";
+import { isRateLimited, DAILY_EMAIL_CAP, DAY_MS } from "@/lib/rateLimit";
 import { sendInquiryNotification } from "@/lib/mail";
 import {
   EMAIL_MAX,
   EMAIL_RE,
   MESSAGE_MAX,
   NAME_MAX,
+  RATE_LIMIT_MAX,
+  RATE_LIMIT_WINDOW_MS,
 } from "@/lib/inquiryLimits";
 
 /**
@@ -28,14 +31,13 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "invalid" }, { status: 400 });
+    return invalid();
   }
   if (typeof body !== "object" || body === null) {
-    return NextResponse.json({ error: "invalid" }, { status: 400 });
+    return invalid();
   }
 
   const raw = body as Record<string, unknown>;
-  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const name = str(raw.name);
   const email = str(raw.email);
   const message = str(raw.message);
@@ -48,8 +50,8 @@ export async function POST(request: NextRequest) {
   // clear the budget reach the cheap short-circuits (honeypot, field shape)
   // and the expensive one (the catalog/Cloudinary lookup further down).
   const ipHash = hashIp(clientIpOf(request));
-  if (await isRateLimited(ipHash)) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+  if (await isRateLimited("inquiry", ipHash, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+    return rateLimited();
   }
 
   // Honeypot: a filled `website` field means a bot. Mimic success exactly
@@ -68,14 +70,14 @@ export async function POST(request: NextRequest) {
     email.length > EMAIL_MAX ||
     !EMAIL_RE.test(email)
   ) {
-    return NextResponse.json({ error: "invalid" }, { status: 400 });
+    return invalid();
   }
 
   // The artwork must exist in the live catalog; its title is snapshotted from
   // there (trusted), never from the client payload. A miss is just "invalid".
   const ref = (await getArtworkIndex()).get(artworkPublicId);
   if (!ref) {
-    return NextResponse.json({ error: "invalid" }, { status: 400 });
+    return invalid();
   }
 
   const inquiry = await prisma.inquiry.create({
@@ -105,7 +107,7 @@ export async function POST(request: NextRequest) {
     // Global daily ceiling — independent of IP, so it holds even against a
     // distributed / IP-rotating flood the per-IP limit can't see. Over the cap
     // we skip the email (the lead is already stored) and flag it for resend.
-    if (await rateLimit("inquiry_email", "__global__", DAILY_EMAIL_CAP, DAY_MS)) {
+    if (await isRateLimited("inquiry_email", "__global__", DAILY_EMAIL_CAP, DAY_MS)) {
       await mark(EmailStatus.SKIPPED, "Daily email cap reached");
       return;
     }

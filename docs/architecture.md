@@ -134,9 +134,10 @@ survive an artwork being renamed, reordered, or deleted.
 | `nav.ts` | Builds the sidebar tree from the catalog (`buildNavTree`) and the admin node (`buildAdminNavNode`). Pure, serializable. |
 | `auth.ts` | Session (iron-session), `isAdmin()`, `verifyCredentials()`. Holds bcrypt. |
 | `db.ts` | The `PrismaClient` singleton, cached on `globalThis` for dev HMR. Lazy — connects on first query. |
-| `inquiries.ts` | Server-only inquiry helpers: `hashIp`, `clientIpOf`, and its own `isRateLimited` (a different arity from `rateLimit.ts`'s — see [tech-debt.md 3.5](tech-debt.md)). Imports Prisma. |
+| `inquiries.ts` | Server-only IP helpers shared by every public write path: `hashIp`, `clientIpOf`. No Prisma import — routes call `rateLimit.ts`'s `isRateLimited` directly with their own bucket name and bounds. |
 | `inquiryLimits.ts` | Shared constants (lengths, email regex, rate limits) with **no server imports**, so the client form can share the server's numbers without pulling Prisma into the browser bundle. |
 | `rateLimit.ts` | The shared Postgres-backed rate limiter (`isRateLimited`) and every bucket's tuning constants (likes, events, search, search-global, the daily email cap). |
+| `http.ts` | Shared public-API response helpers (`invalid`, `rateLimited`, `busy`, `unavailable`, `unauthorized`, `noContent`) and string coercion (`str`, `boundedStr`), used by every route under `app/api/`. |
 | `settings.ts` | Server-only key/value settings (`getSetting`/`setSetting`), plus `isEventStreamingEnabled()` with a ~60s in-process cache on the ingest hot path. |
 | `mail.ts` | `sendInquiryNotification()` — the Resend call behind the best-effort inquiry email. Best-effort: warns and no-ops if unconfigured rather than throwing. |
 | `collector.ts` | Forwards enriched events to the Kafka collector over HTTP (best-effort, swallows every failure). |
@@ -347,16 +348,19 @@ endpoint, never the Upload API's `rename`, so `public_id` never changes.
 
 **2. Public inquiry** — `POST /api/inquiries`
 ```
-parse/trim → honeypot `website` filled? → 200 {ok:true}, no DB write
+parse/trim → rate limit: sha256(ip + IP_HASH_SALT), ≥5 in 10min → 429
+           → honeypot `website` filled? → 200 {ok:true}, no DB write
            → validate name/email/message lengths + email shape → 400 "invalid"
            → artworkPublicId must exist in getArtworkIndex() → 400
              (and its title is snapshotted from there — never from the client)
-           → rate limit: sha256(ip + IP_HASH_SALT), ≥5 in 10min → 429
            → insert → 201
 ```
 Every rejection is terse and identical in shape — enumerating *why* only helps
-bots. The honeypot mimics success exactly. Rate limiting is **DB-backed** because
-in-memory counters are per-instance on serverless, i.e. useless.
+bots. The honeypot mimics success exactly — but only once the request has
+cleared the rate limit, so a bot that keeps the field filled is still capped
+like any other submission (see tech-debt.md 3.8: it used to run before the
+limiter, an unlimited bypass). Rate limiting is **DB-backed** because in-memory
+counters are per-instance on serverless, i.e. useless.
 
 **3. Comment log mutations** — Server Actions in `app/admin/comments/actions.ts`
 (`toggleReadAction`, `deleteInquiryAction`): `isAdmin()` guard → single-row
@@ -478,8 +482,9 @@ The Phase D substrate was built to be reused:
   (`artworkPublicId` + snapshots + status enum) via one migration, add a child to
   `buildAdminNavNode()` (NavTree needs no changes), and copy the
   `/admin/comments` page + Server Actions pattern.
-- **A new public write endpoint** — the honeypot → validate → catalog-check →
-  rate-limit → insert pipeline in `app/api/inquiries/route.ts` is the template.
+- **A new public write endpoint** — the rate-limit → honeypot → validate →
+  catalog-check → insert pipeline in `app/api/inquiries/route.ts` is the
+  template (the limit comes first so nothing, honeypot included, bypasses it).
 - **A new artwork metadata field** — add to `META_KEYS` in `catalog.ts` and
   `FIELD_KEYS` in `AdminProvider.tsx`.
 

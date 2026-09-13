@@ -182,23 +182,25 @@ re-render triggers, each feeding a separate context so unrelated components don'
 
 ```mermaid
 flowchart LR
-    F["Form POST"] --> HP{"Honeypot filled?"}
+    F["Form POST"] --> RL{"Rate limited?"}
+    RL -->|yes| R429["429"]
+    RL -->|no| HP{"Honeypot filled?"}
     HP -->|yes| FAKE["200 OK — nothing written"]
     HP -->|no| VAL["Validate fields"]
-    VAL --> RL{"Rate limited?"}
-    RL -->|yes| R429["429"]
-    RL -->|no| ROW["Insert inquiry row"]
+    VAL --> ROW["Insert inquiry row"]
     ROW --> R201["201 to visitor"]
     ROW -.->|"after() — post-response"| CAP{"Daily cap?"}
     CAP -->|under| SEND["Resend → owner"]
     CAP -->|over| SKIP["Mark SKIPPED"]
 ```
 
-**How it works.** A hidden honeypot field catches naive bots; fields are validated server-side
-against shared bounds (name 100, email 254, message 2000); a per-IP limit allows 5 per 10
-minutes. The artwork title is resolved server-side from the catalog and **snapshotted** onto the
-row. The email is dispatched *after* the response is flushed, and each row records its own
-outcome — `PENDING / SENT / SKIPPED / FAILED` plus the error text.
+**How it works.** A per-IP limit (5 per 10 minutes) is checked first, before anything that could
+distinguish a bot from a real visitor — so a bot that keeps the hidden honeypot field filled is
+still capped rather than exempt (tech-debt.md 3.8). Only requests under budget reach the honeypot
+check, then field validation against shared bounds (name 100, email 254, message 2000). The
+artwork title is resolved server-side from the catalog and **snapshotted** onto the row. The email
+is dispatched *after* the response is flushed, and each row records its own outcome —
+`PENDING / SENT / SKIPPED / FAILED` plus the error text.
 
 **Design decisions.**
 - **The lead is never lost to a mail failure.** The row is committed before the send is
@@ -207,7 +209,8 @@ outcome — `PENDING / SENT / SKIPPED / FAILED` plus the error text.
   silent drop becomes a visible, recoverable state.
 - **Snapshot over join.** Storing the title means the log survives renames and deletions — and
   a client-supplied title never reaches the admin page, closing an injection path.
-- **Terse, uniform errors.** The honeypot mimics success *exactly* (same status, same body).
+- **Terse, uniform errors.** The honeypot mimics success *exactly* (same status, same body) —
+  but only once the request has cleared the rate limit, so the mimicry can't be used to dodge it.
   Bots learn nothing from probing.
 - **A global daily send cap** bounds cost even when a distributed flood keeps every individual
   IP under the per-IP limit. Over the cap, inquiries still save; only the email is skipped.
@@ -463,7 +466,7 @@ than crashing when unset — with mail unconfigured, inquiries still save.
   context-replace semantics, for instance.
 
 That's a real gap, stated plainly. The first tests worth writing: the rate limiter's window
-arithmetic, the inquiry pipeline's ordering (honeypot → validation → limit → row → email), and
+arithmetic, the inquiry pipeline's ordering (limit → honeypot → validation → row → email), and
 the search route's sanitization and floor.
 
 ---

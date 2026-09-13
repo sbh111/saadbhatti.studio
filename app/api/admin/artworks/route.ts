@@ -4,6 +4,7 @@ import { isAdmin } from "@/lib/auth";
 import { META_KEYS } from "@/lib/catalog";
 import { reorderCollection, updateArtworkContext } from "@/lib/cloudinaryAdmin";
 import { CATALOG_CACHE_TAG } from "@/lib/constants";
+import { invalid, unauthorized } from "@/lib/http";
 
 interface EditPayload {
   publicId: string;
@@ -29,7 +30,7 @@ interface RequestBody {
  */
 export async function POST(request: NextRequest) {
   if (!(await isAdmin())) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   let body: RequestBody;
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
     body = await request.json();
     if (typeof body !== "object" || body === null) throw new Error("bad body");
   } catch {
-    return NextResponse.json({ error: "bad request" }, { status: 400 });
+    return invalid();
   }
   const edits = Array.isArray(body.edits) ? body.edits : [];
   const reorders = Array.isArray(body.reorders) ? body.reorders : [];

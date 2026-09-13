@@ -1,15 +1,16 @@
 import { createHash } from "node:crypto";
-import { isRateLimited as limit } from "./rateLimit";
-import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./inquiryLimits";
 
 /**
  * Server-only inquiry helpers: IP hashing (we never store a raw IP) and the
- * DB-backed rate limit. Kept out of the client bundle — pulls in the DB layer
- * transitively via lib/rateLimit. `isRateLimited` here is inquiry-specific and
- * used only by app/api/inquiries/route.ts, but `hashIp` and `clientIpOf` are
- * the shared per-IP building blocks for every public write path (likes,
- * events, search, inquiries) — `clientIpOf` in particular is the spoofing
- * guard behind all of them, so treat it as broad-blast-radius, not local.
+ * client-IP resolver every rate-limited route builds its bucket key from.
+ * Kept out of the client bundle — hashIp/clientIpOf are the shared per-IP
+ * building blocks for every public write path (likes, events, search,
+ * inquiries) — `clientIpOf` in particular is the spoofing guard behind all of
+ * them, so treat it as broad-blast-radius, not local. Routes call the shared
+ * `isRateLimited` in lib/rateLimit.ts directly with their own bucket name and
+ * bounds; there used to be a thin inquiry-specific wrapper here, but it was
+ * the only such wrapper in the codebase and its different arity from the
+ * function it wrapped invited exactly the alias-juggling tech debt 3.5 found.
  */
 
 /** Salted sha256 of an IP — never the raw address. */
@@ -52,13 +53,4 @@ export function clientIpOf(request: Request): string {
     if (parts.length) return parts[parts.length - 1];
   }
   return "unknown";
-}
-
-/**
- * True once this ipHash has used up its inquiry budget for the window. A thin
- * wrapper over the shared rate limiter (lib/rateLimit.ts) on the "inquiry"
- * bucket, reusing the shared bounds from lib/inquiryLimits.ts.
- */
-export function isRateLimited(ipHash: string): Promise<boolean> {
-  return limit("inquiry", ipHash, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS);
 }

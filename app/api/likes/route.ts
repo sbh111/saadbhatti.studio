@@ -1,8 +1,9 @@
-import { NextResponse, after, type NextRequest } from "next/server";
+import { after, type NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { isAdmin } from "@/lib/auth";
 import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
+import { invalid, noContent, str } from "@/lib/http";
 import { clientIpOf, hashIp } from "@/lib/inquiries";
 import { isRateLimited, LIKE_MAX, LIKE_WINDOW_MS } from "@/lib/rateLimit";
 import { isEventStreamingEnabled } from "@/lib/settings";
@@ -23,11 +24,6 @@ import { EVENT_SCHEMA_VERSION, SESSION_ID_MAX } from "@/lib/eventTypes";
  */
 export const dynamic = "force-dynamic";
 
-const noContent = () => new NextResponse(null, { status: 204 });
-const invalid = () => NextResponse.json({ error: "invalid" }, { status: 400 });
-
-const strOf = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-
 export async function POST(request: NextRequest) {
   let body: unknown;
   try {
@@ -35,13 +31,13 @@ export async function POST(request: NextRequest) {
   } catch {
     return invalid();
   }
-  const artworkPublicId = strOf((body as Record<string, unknown>)?.artworkPublicId);
+  const artworkPublicId = str((body as Record<string, unknown>)?.artworkPublicId);
   if (!artworkPublicId) return invalid();
 
   // sessionId only feeds the optional Kafka event (guarded below), so a bogus
   // over-long value shouldn't fail the like — just drop it. Cap shared with the
   // /api/events contract.
-  const rawSessionId = strOf((body as Record<string, unknown>)?.sessionId);
+  const rawSessionId = str((body as Record<string, unknown>)?.sessionId);
   const sessionId = rawSessionId.length <= SESSION_ID_MAX ? rawSessionId : "";
 
   // Owner liking own work is noise; re-check server-side (client flag untrusted).
@@ -102,7 +98,7 @@ export async function DELETE(request: NextRequest) {
   } catch {
     return invalid();
   }
-  const artworkPublicId = strOf((body as Record<string, unknown>)?.artworkPublicId);
+  const artworkPublicId = str((body as Record<string, unknown>)?.artworkPublicId);
   if (!artworkPublicId) return invalid();
   if (await isAdmin()) return noContent();
 

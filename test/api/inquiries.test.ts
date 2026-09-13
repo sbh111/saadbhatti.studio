@@ -22,19 +22,15 @@ vi.mock("@/lib/mail", () => ({
   sendInquiryNotification: (...args: unknown[]) => sendInquiryNotification(...args),
 }));
 
-// Only the limiter is faked here — clientIpOf/hashIp are the real
-// implementations from lib/inquiries.ts (see the import below).
+// clientIpOf/hashIp (lib/inquiries.ts) run for real, unmocked — only the
+// shared limiter (lib/rateLimit.ts) is faked, since the route now calls it
+// directly for both the per-IP inquiry budget and, inside the fire-and-forget
+// after() callback, the daily email-notification cap. A single mock covers
+// both call sites; none of the assertions below distinguish which bucket a
+// call was for.
 const isRateLimited = vi.fn().mockResolvedValue(false);
-vi.mock("@/lib/inquiries", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/inquiries")>();
-  return { ...actual, isRateLimited: (...args: unknown[]) => isRateLimited(args[0] as never) };
-});
-
-// The daily email-notification cap lib/rateLimit.ts also exports is only
-// consulted inside the fire-and-forget after() callback — irrelevant to the
-// response contract this test pins, so it's stubbed to never trip.
 vi.mock("@/lib/rateLimit", () => ({
-  isRateLimited: vi.fn().mockResolvedValue(false),
+  isRateLimited: (...args: unknown[]) => isRateLimited(...args),
   DAILY_EMAIL_CAP: 200,
   DAY_MS: 86_400_000,
 }));
