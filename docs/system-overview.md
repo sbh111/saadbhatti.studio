@@ -346,6 +346,9 @@ starts entirely — changes one function and leaves the store, API, and UI untou
 **Key files:** [lib/clip.ts](../lib/clip.ts) · [app/api/search/route.ts](../app/api/search/route.ts) ·
 [embed/main.py](../embed/main.py) · [components/SearchDrawer.tsx](../components/SearchDrawer.tsx)
 
+**Running the embedder:** see [docs/operations.md §1](operations.md#1-re-indexing-search) for
+when to re-run it and how — including drift detection for when a re-run has been missed.
+
 **Live status:** merged to `main`. The ONNX packaging fix is deployed but end-to-end production
 search has not yet been confirmed, and `MIN_SCORE` still needs tuning against real queries.
 

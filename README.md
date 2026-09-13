@@ -152,6 +152,13 @@ Turn the toggle off, or `docker compose stop collector kafka`, and the site (and
 likes) behave identically. Production deployment (EC2, TLS, security group) and
 the Python analysis consumer are Phases K2/K3 in the plan doc.
 
+## Semantic image search
+
+Visitors can search artwork by description (`/api/search`), backed by CLIP image vectors that
+a separate on-demand container (`embed/`, `docker compose --profile embedding`) writes to
+Postgres. It does not run automatically — see
+[docs/operations.md §1](docs/operations.md#1-re-indexing-search) for when and how to re-run it.
+
 ## Deploy
 
 Hosted on Vercel (project linked to this repo; pushes to `main` deploy).

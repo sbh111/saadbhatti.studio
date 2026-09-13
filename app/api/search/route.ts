@@ -96,11 +96,18 @@ export async function POST(request: NextRequest) {
     ORDER BY embedding <=> ${literal}::vector
     LIMIT 5`;
 
-  // Map winning public_ids back to display data + a deep link.
+  // Map winning public_ids back to display data + a deep link. A miss here means
+  // the vector is stale — the artwork was deleted (or never embedded) but
+  // artwork_embeddings hasn't caught up — see docs/operations.md §1 (drift
+  // detection). Log it: this is the only place that would ever notice.
   const index = await getArtworkIndex();
+  const misses: string[] = [];
   const results = rows.flatMap(({ publicId }) => {
     const ref = index.get(publicId);
-    if (!ref) return [];
+    if (!ref) {
+      misses.push(publicId);
+      return [];
+    }
     return [
       {
         image: publicId,
@@ -109,6 +116,12 @@ export async function POST(request: NextRequest) {
       },
     ];
   });
+  if (misses.length > 0) {
+    console.warn(
+      `search: ${misses.length} vector hit(s) did not map to a catalog artwork — stale embeddings? re-run the embedder (docs/operations.md §1):`,
+      misses
+    );
+  }
 
   return NextResponse.json({ results });
 }
