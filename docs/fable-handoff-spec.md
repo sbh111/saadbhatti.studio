@@ -1,6 +1,21 @@
 # saadbhatti.studio — Fable Build Hand-off Spec
 
-> Everything Fable needs to build the site from the approved Figma design. Companion docs:
+> **⚠️ Historical / superseded.** This is the original Phase 0 build brief, kept
+> for the design-token and layout reference (§3–4, §9–10 are still accurate).
+> Several concrete claims below are **no longer true** — for current state see
+> [system-overview.md](system-overview.md) and [architecture.md](architecture.md):
+> - **§2 "Images via `next/image`"** — false today. Artwork images are a raw
+>   `<img>` with hand-built Cloudinary URLs (`lib/cloudinary.ts`); the CDN does
+>   the optimization, so `next/image`'s own transform pipeline was never needed.
+> - **§2 "Tailwind tokens wired into `tailwind.config`"** — false today. The repo
+>   is on Tailwind v4, which has no `tailwind.config.*` file; tokens live as CSS
+>   variables in `app/globals.css`/`postcss.config.mjs`.
+> - **§13 "no admin in Phase 0"** — long since built. There's a full inline admin
+>   surface (edit/reorder artworks, comment log, likes, settings) gated by an
+>   `iron-session` cookie — see [system-overview.md §4](system-overview.md#4-admin-editing-and-auth-).
+>   Print purchasing and an order-log view remain unbuilt, as this section predicted.
+>
+> Companion docs:
 > `saadbhattistudioPlan(refined).md` (product intent) and `questions.md` (decisions Q1–Q20).
 > **Figma:** file `saadbhatti.studio` (key `yW8EuGztFSd0vAVqo0uDDA`), page **"saadbhatti.studio — v1"**.
 > Sections: *Components* (`Sidebar / master`) and *Screens* (5 desktop + 3 mobile frames).

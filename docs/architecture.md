@@ -92,12 +92,16 @@ opaque reference and a display snapshot.
 | `content/` | Site text only — title, intro, bio, contact, hero/headshot refs. | Copy edits. **Not** artwork data; that's Cloudinary's job. |
 | `public/` | Static files served verbatim at the site root. | `images/hero.jpg`, `headshot.jpg`, `siteBorder.png` (the carpet frame). Referenced by a leading `/`. |
 | `docs/` | Planning + reference documents. Not shipped. | Specs, this doc, learnings, Q&A history. |
+| `collector/` | Python/FastAPI service (Kafka event ingest). Deployed separately, on the EC2 box — Vercel never builds it. | `main.py`, `Dockerfile`, `requirements.txt`. See [system-overview.md §9](system-overview.md#9-kafka-event-streaming--k1--k2--k3-). |
+| `embed/` | Python/FastAPI CLIP embedder — an on-demand container, not a standing service. Writes `artwork_embeddings`. | `main.py`, `Dockerfile`, `requirements.txt`. See [system-overview.md §8](system-overview.md#8-semantic-image-search-) and [operations.md §1](operations.md#1-re-indexing-search). |
 | `.claude/` | Agent tooling config (`launch.json` = dev-server definition for the preview tools). | Not application code. |
 
 Root files worth knowing: `proxy.ts` (the middleware — see §8), `docker-compose.yml`
-(local Postgres), `next.config.ts` (intentionally empty), `postcss.config.mjs`
-(Tailwind v4 entry point), `tsconfig.json` (defines the `@/*` → project-root alias
-used by every import).
+(local Postgres, plus the `streaming` and `embedding` profiles), `next.config.ts`
+(38 lines — ships the ONNX native runtime the CLIP text encoder needs at build
+time; see [system-overview.md §8](system-overview.md#8-semantic-image-search-)),
+`postcss.config.mjs` (Tailwind v4 entry point), `tsconfig.json` (defines the
+`@/*` → project-root alias used by every import).
 
 ---
 
@@ -108,7 +112,7 @@ Four stores, strictly separated. Knowing which owns what prevents most mistakes.
 | Store | Owns | Written by | Read by |
 |---|---|---|---|
 | **Cloudinary** (`sbh111`) | Mediums, collections, artworks, images, titles, metadata, order | Admin UI → `POST /api/admin/artworks`; Saad uploading directly | `lib/catalog.ts` at build/ISR |
-| **Postgres** (Neon prod / Docker local) | Inquiries only | `POST /api/inquiries`; comment-log Server Actions | `/admin/comments` |
+| **Postgres** (Neon prod / Docker local) | Inquiries, likes, settings, rate-limit windows, CLIP embeddings — five tables now, not one; see [schema-design.md](schema-design.md) | API routes; the CLIP embedder | `/admin/comments`, `/admin/likes`, `/admin/settings`, `/api/search` |
 | **`content/content.json`** | Site text (title, intro, bio, contact, hero/headshot refs) | Hand-edited, committed | `lib/content.ts` |
 | **`public/`** | Hero, headshot, border image | Committed files | Anything with a `/`-leading src |
 
@@ -130,8 +134,16 @@ survive an artwork being renamed, reordered, or deleted.
 | `nav.ts` | Builds the sidebar tree from the catalog (`buildNavTree`) and the admin node (`buildAdminNavNode`). Pure, serializable. |
 | `auth.ts` | Session (iron-session), `isAdmin()`, `verifyCredentials()`. Holds bcrypt. |
 | `db.ts` | The `PrismaClient` singleton, cached on `globalThis` for dev HMR. Lazy — connects on first query. |
-| `inquiries.ts` | Server-only inquiry helpers: `hashIp`, `clientIpOf`, `isRateLimited`. Imports Prisma. |
+| `inquiries.ts` | Server-only inquiry helpers: `hashIp`, `clientIpOf`, and its own `isRateLimited` (a different arity from `rateLimit.ts`'s — see [tech-debt.md 3.5](tech-debt.md)). Imports Prisma. |
 | `inquiryLimits.ts` | Shared constants (lengths, email regex, rate limits) with **no server imports**, so the client form can share the server's numbers without pulling Prisma into the browser bundle. |
+| `rateLimit.ts` | The shared Postgres-backed rate limiter (`isRateLimited`) and every bucket's tuning constants (likes, events, search, search-global, the daily email cap). |
+| `settings.ts` | Server-only key/value settings (`getSetting`/`setSetting`), plus `isEventStreamingEnabled()` with a ~60s in-process cache on the ingest hot path. |
+| `mail.ts` | `sendInquiryNotification()` — the Resend call behind the best-effort inquiry email. Best-effort: warns and no-ops if unconfigured rather than throwing. |
+| `collector.ts` | Forwards enriched events to the Kafka collector over HTTP (best-effort, swallows every failure). |
+| `eventTypes.ts` | Client-safe event schema (`ClientEvent`, batch/flush constants) shared by the tracker and `/api/events` — same split rationale as `inquiryLimits.ts`. |
+| `sessionId.ts` | Client-side per-tab session id (sessionStorage) used to key events and likes. |
+| `clip.ts` | The CLIP **text** encoder (transformers.js/ONNX) used by `/api/search`; the image side lives in `embed/`. |
+| `constants.ts` | Single-source-of-truth magic values shared across files that must not drift (site origin, cache tag, revalidate window, layout numbers). |
 
 The `inquiries.ts` / `inquiryLimits.ts` split exists solely to enforce that last
 point. If you need a constant on both sides, it goes in `inquiryLimits.ts`.
@@ -169,9 +181,17 @@ they're used as the stable key everywhere.
 | `/[medium]/[collection]` | `app/[medium]/[collection]/page.tsx` | SSG via `generateStaticParams` | public |
 | `/admin/login` | `app/admin/login/page.tsx` | Dynamic | public (the way in) |
 | `/admin/comments` | `app/admin/comments/page.tsx` | `force-dynamic` | admin |
+| `/admin/likes` | `app/admin/likes/page.tsx` | `force-dynamic` | admin |
+| `/admin/settings` | `app/admin/settings/page.tsx` | `force-dynamic` | admin |
 | `POST /api/admin/artworks` | route handler | Dynamic | admin |
 | `GET /api/admin/session` | route handler | Dynamic | public (returns a bare boolean) |
 | `POST /api/inquiries` | route handler | Dynamic | public |
+| `POST` / `DELETE /api/likes` | route handler | `force-dynamic` | public (no-op if admin) |
+| `POST /api/events` | route handler | `force-dynamic` | public (no-op if admin; always 204) |
+| `GET /api/events/config` | route handler | `force-dynamic` | public (returns `{enabled}`) |
+| `GET /api/catalog-index` | route handler | `force-dynamic` | bearer token (`CATALOG_INDEX_TOKEN`) — a machine caller (the embedder), not a browser, so it's outside `/api/admin` on purpose |
+| `POST /api/search` | route handler | `force-dynamic`, Node runtime | public, rate-limited |
+| `GET /api/health` | route handler | `force-dynamic` | public — see [operations.md §3](operations.md#3-monitoring) |
 
 `app/layout.tsx` is the root: fonts, metadata, `revalidate = 3600`, and it builds
 the nav tree server-side, wrapping everything in `AdminProvider` → `AppShell`.
@@ -193,6 +213,7 @@ Server components (no `"use client"`) render on the server and ship no JS:
 | `ArtworkImage` | Responsive image, srcset + blur-up, capped so the caption stays on screen (`~66vh` height budget). Handles both local `/` paths and Cloudinary ids. |
 | `CollectionCover` | One collection on a medium page. |
 | `WIPView` | Placeholder for an empty medium. |
+| `InquiryEmailAlert` | Renders the failed/skipped-email banner + resend on a comment-log row. |
 
 Client components (`"use client"` — interactive):
 
@@ -207,6 +228,9 @@ Client components (`"use client"` — interactive):
 | `AdminBar` | Bottom bar: label, log out, dirty count, Save all / Discard all. | `useAdminBar` |
 | `InquiryForm` | Inline inquiry form; hidden for admins. | `useIsAdmin` |
 | `DeleteInquiryButton` | `window.confirm` guard on the delete form. | — |
+| `LikeButton` | The like/unlike heart; localStorage-only state, zero network on load, hidden for admins. | — |
+| `EventTracker` | Mounted once in `AppShell`; batches clickstream events and flushes via `sendBeacon`. Suppressed for admins, DNT, or the streaming toggle off. | `useIsAdmin` |
+| `SearchDrawer` | Full-height slide-in search UI over `/api/search`. | — |
 
 `ReorderableArtworkList` is the subtlest piece: it takes the *server-rendered*
 children and re-emits them in the staged order. React reconciles by key, so
@@ -342,8 +366,13 @@ Prisma write → `revalidatePath("/admin/comments")`.
 
 ## 11. Database
 
-One table. Schema in `prisma/schema.prisma`, history in `prisma/migrations/`
-(committed — the migration folder *is* the schema's audit trail).
+**Five tables now, not one** — `inquiries` (this section's original subject),
+plus `likes`, `settings`, `rate_windows`, and `artwork_embeddings` added by the
+likes/streaming, rate-limiting, and search work. Schema in `prisma/schema.prisma`,
+history in `prisma/migrations/` (committed — the migration folder *is* the
+schema's audit trail). **Full reference:** [schema-design.md](schema-design.md)
+— this section keeps only the original `inquiries` detail, which is still
+accurate.
 
 ```
 Inquiry → table "inquiries"
@@ -352,14 +381,17 @@ Inquiry → table "inquiries"
   artworkTitle     varchar(255)   -- server-resolved snapshot
   name/email/message
   status           NEW | READ
+  emailStatus      PENDING | SENT | SKIPPED | FAILED   -- notification outcome
+  emailError       varchar(500), nullable
   ipHash           varchar(64)    -- sha256(ip + IP_HASH_SALT); never a raw IP
   createdAt
   @@index([createdAt desc])       -- the log's ordering
-  @@index([ipHash, createdAt])    -- the rate-limit lookup
+  @@index([ipHash, createdAt])    -- dead: no query filters by ipHash any more
+                                   -- (see schema-design.md §7)
 ```
 
-Both indexes exist to serve one query each. No `updatedAt`, no soft delete —
-status plus hard delete is the entire lifecycle.
+No `updatedAt`, no soft delete — status plus hard delete is the entire
+lifecycle.
 
 **Pooled vs direct connections.** Prisma is configured with two URLs because they
 do different jobs:
@@ -386,6 +418,17 @@ connects lazily, which is what lets `next build` succeed with no database at all
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | — | ✓ | ✓ | `auth.ts` |
 | `SESSION_SECRET` | — | ✓ | ✓ | `auth.ts` |
 | `IP_HASH_SALT` | — | ✓ | ✓ | `inquiries.ts` |
+| `RESEND_API_KEY` / `INQUIRY_NOTIFY_FROM` / `INQUIRY_NOTIFY_TO` | — | ✓ | ✓ | `mail.ts` (best-effort — unset just skips the send) |
+| `EVENT_COLLECTOR_URL` / `EVENT_INGEST_TOKEN` | — | ✓ | ✓ (+ EC2 `deploy/.env`) | `collector.ts` (send) / `collector/main.py` (check) |
+| `CATALOG_INDEX_TOKEN` | — | ✓ | ✓ | `app/api/catalog-index/route.ts` + the embedder |
+| `EMBED_TOKEN` / `EMBED_DATABASE_URL` / `MODEL_ID` / `MODEL_REVISION` | — | — | embedder env only (`docker-compose.yml`) | `embed/main.py` |
+| `INGEST_DOMAIN` | — | — | EC2 `deploy/.env` only | `deploy/compose.prod.yml` (Caddy TLS) |
+| `KAFKA_BOOTSTRAP` / `KAFKA_TOPIC` | — | — | collector env, defaulted | `collector/main.py` |
+
+This table covers the Next app's own config surface. For the **complete** list
+— including every Python-service and compose-only variable, what breaks when
+each is wrong, and rotation order for the two tokens that live in two places —
+see [operations.md §2](operations.md#2-secrets).
 
 **Why two files:** the **Prisma CLI reads `.env` and never `.env.local`**, while
 Next reads both (`.env.local` wins per-variable). Database URLs therefore live in
@@ -449,5 +492,7 @@ The Phase D substrate was built to be reused:
 - **The comment log caps at 200 rows** with a footnote; pagination is deferred.
 - **Untitled artworks** display a filename-derived name (`muyThai s2deee`), which
   is what the comment log will show until a `Title Name` context value is set.
-- **Email notification on new inquiries is out of scope** — the log is pull-only.
-  A fire-and-forget send after insert is the natural place.
+- **Email notification on new inquiries has shipped** (Resend, best-effort,
+  fired after the row is committed) — this section originally called it out of
+  scope; see [system-overview.md §5](system-overview.md#5-inquiries-and-email-notifications-)
+  for how it works.
