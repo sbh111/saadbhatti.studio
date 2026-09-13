@@ -397,6 +397,8 @@ logs":
 | `inquiry notification failed` / `inquiry email-status update failed` | [app/api/inquiries/route.ts](../app/api/inquiries/route.ts) | Resend rejected a send, or the status write after it failed — the inquiry itself is still saved (also visible per-row via `InquiryEmailAlert` in the comment log). |
 | `edit save failed for …` / `reorder failed for …` | [app/api/admin/artworks/route.ts](../app/api/admin/artworks/route.ts) | A Cloudinary write from the admin bulk save failed — the edit stays staged for retry, but worth knowing if it's frequent. |
 | `forwardEvents: …` | [lib/collector.ts](../lib/collector.ts) | The event forward to the EC2 collector failed or returned non-2xx (best-effort — never affects the visitor). |
+| `producer queue still full after retry, dropping batch …` | [collector/main.py](../collector/main.py) | Kafka backpressure didn't clear even after one poll-and-retry — the collector returned 503 and the batch was dropped (still invisible to the visitor; `forwardEvents` above logs the 503 on the Next side). |
+| `flush timed out with N message(s) still queued` | [collector/main.py](../collector/main.py) | The broker didn't ack the batch within the flush deadline — the collector returned 503 instead of the silent-loss 204 this replaced. Frequent occurrences mean Kafka itself is degraded. |
 | `health: database check failed` | [app/api/health/route.ts](../app/api/health/route.ts) | What flips `/api/health` to `503` — the uptime checker above should already be catching this, this line is what confirms *why* in the logs. |
 
 None of these currently page anyone — they're what to `grep`/search for by hand, or what a log
