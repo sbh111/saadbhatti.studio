@@ -8,7 +8,11 @@ import { clientIpOf, hashIp } from "@/lib/inquiries";
 import { isRateLimited, LIKE_MAX, LIKE_WINDOW_MS } from "@/lib/rateLimit";
 import { isEventStreamingEnabled } from "@/lib/settings";
 import { forwardEvents, type EnrichedEvent } from "@/lib/collector";
-import { EVENT_SCHEMA_VERSION, SESSION_ID_MAX } from "@/lib/eventTypes";
+import {
+  ARTWORK_PUBLIC_ID_MAX,
+  EVENT_SCHEMA_VERSION,
+  SESSION_ID_MAX,
+} from "@/lib/eventTypes";
 
 /**
  * Public like / unlike for an artwork — the one EXPLICIT interest signal. A
@@ -32,7 +36,9 @@ export async function POST(request: NextRequest) {
     return invalid();
   }
   const artworkPublicId = str((body as Record<string, unknown>)?.artworkPublicId);
-  if (!artworkPublicId) return invalid();
+  if (!artworkPublicId || artworkPublicId.length > ARTWORK_PUBLIC_ID_MAX) {
+    return invalid();
+  }
 
   // sessionId only feeds the optional Kafka event (guarded below), so a bogus
   // over-long value shouldn't fail the like — just drop it. Cap shared with the
@@ -99,7 +105,9 @@ export async function DELETE(request: NextRequest) {
     return invalid();
   }
   const artworkPublicId = str((body as Record<string, unknown>)?.artworkPublicId);
-  if (!artworkPublicId) return invalid();
+  if (!artworkPublicId || artworkPublicId.length > ARTWORK_PUBLIC_ID_MAX) {
+    return invalid();
+  }
   if (await isAdmin()) return noContent();
 
   // Same "like" bucket as POST, so a like/unlike toggle-flood shares one budget.
@@ -107,6 +115,13 @@ export async function DELETE(request: NextRequest) {
   if (await isRateLimited("like", ipHash, LIKE_MAX, LIKE_WINDOW_MS)) {
     return noContent();
   }
+
+  // Same trust rule as POST: the artwork must exist in the live catalog.
+  // Mirrors POST's guard order (length cap → admin no-op → rate limit →
+  // catalog check) so DELETE can't be used to probe the DB with an
+  // unbounded or nonexistent id that POST would have rejected first.
+  const ref = (await getArtworkIndex()).get(artworkPublicId);
+  if (!ref) return invalid();
 
   // deleteMany → idempotent (unliking something not liked is a no-op, not a 404).
   await prisma.like.deleteMany({ where: { artworkPublicId, ipHash } });
