@@ -11,6 +11,7 @@ runs. New sections get appended here rather than scattered across READMEs.
 1. [Re-indexing search](#1-re-indexing-search)
 2. [Secrets](#2-secrets)
 3. [Backups and restore](#3-backups-and-restore)
+4. [Monitoring](#4-monitoring)
 
 ---
 
@@ -326,3 +327,87 @@ actually grows):
 reasonable starting point — inquiries are the only unrecoverable data and this site's write
 volume is low) in addition to leaning on Neon's PITR for the common case, and run the full
 restore drill above at least once a quarter.
+
+---
+
+## 4. Monitoring
+
+The concrete gap this section closes: the Next app had no health endpoint at all, no uptime
+check pointed at it, and no error tracking. The strategy today is entirely `console.*` calls
+into Vercel's logs, which have short retention — so a failure nobody happened to be watching
+for scrolls off before anyone notices. This section is the low-effort floor: what to poll, what
+to grep for, and what's deliberately *not* done yet.
+
+### Poll `/api/health`
+
+`GET /api/health` runs one bounded `SELECT 1` through Prisma and returns `200 {"status":"ok"}`
+or `503 {"status":"degraded"}` — terse on purpose, it never echoes the underlying error. It's
+public, cheap, and safe to hit often; it does **not** check Cloudinary (see the comment in
+[app/api/health/route.ts](../app/api/health/route.ts) for why — a Cloudinary outage already
+takes down every public page, so an uptime check already polling `/` learns that independently).
+
+Point a free external uptime checker at it — e.g. [UptimeRobot](https://uptimerobot.com) or
+[Better Uptime](https://betteruptime.com) both have usable free tiers; this is a
+**recommendation, not a dependency the app requires** — any HTTP-poll-with-alerting service
+works, and it's the owner's call which one (and whether to add another Vercel-side check like
+Vercel's own Monitoring, a paid-plan feature). A 5-minute interval is more than enough for a
+site this size; alert on two consecutive failures rather than one, to avoid paging on a single
+cold-start blip.
+
+### The Python services already have health endpoints — nothing polls them
+
+Both already expose `GET /health`, unauthenticated:
+
+- **`embed/` (the CLIP embedder), port 8100** — `{"ok": bool, "model", "revision", "dim",
+  "modelError", "hostGateway", "env": {...presence only...}}`. This container is **on-demand**
+  (see [§1](#1-re-indexing-search)) — it isn't running most of the time, so there is nothing to
+  continuously poll in production. Check it manually right before a reindex:
+  `curl localhost:8100/health` (or the production host, if it's ever run as a standing
+  service) — a non-null `modelError` means `/reindex` will 503 until the model loads correctly.
+- **`collector/` (the Kafka ingest service), port 8000** — `{"ok": true}`, unauthenticated
+  liveness only (it doesn't check the Kafka connection). This one **is** a standing service on
+  the EC2 box when K2 is deployed — if/when that happens, add it as a second uptime-checker
+  target (e.g. `https://ingest.saadbhatti.studio/health` — same recommendation as above) so a
+  wedged collector doesn't silently drop every event.
+
+### Where logs live today
+
+- **Vercel** — the Next app's `console.*` output, viewable in the Vercel dashboard (Project →
+  Logs) or `vercel logs`. **Retention is short** (exact window depends on the Vercel plan) — this
+  is the entire reason a real error-tracking tool (below) would help.
+- **EC2 (collector)** — `docker compose -f deploy/compose.prod.yml logs -f collector` (or
+  `kafka`) on the box itself, once K2 is actually deployed. Nothing ships these off-box today;
+  they exist only as long as the container's log driver retains them.
+- **Local dev** — whichever terminal is running `next dev` / `docker compose logs`.
+
+### Log lines worth alerting on
+
+Grepping the codebase for the warnings and errors already written — these are the signals that
+exist today but that nothing currently surfaces beyond "someone happened to be tailing Vercel
+logs":
+
+| Line | Where | What it means |
+|---|---|---|
+| `search: N vector hit(s) did not map to a catalog artwork` | [app/api/search/route.ts](../app/api/search/route.ts) | Embeddings have drifted from the catalog — re-run the embedder ([§1](#1-re-indexing-search)). |
+| `search: embed failed` | [app/api/search/route.ts](../app/api/search/route.ts) | The CLIP text encoder threw — search is down for everyone. |
+| `settings: embedding drift check failed` | [app/admin/settings/page.tsx](../app/admin/settings/page.tsx) | The `/admin/settings` drift widget couldn't reach Cloudinary or the database. |
+| `isEventStreamingEnabled: settings read failed, defaulting off` | [lib/settings.ts](../lib/settings.ts) | The settings table is unreachable — streaming silently disables itself (fail-closed, by design — see [system-overview.md §10](system-overview.md#10-patterns-that-recur)). |
+| `[mail] inquiry notification skipped` | [lib/mail.ts](../lib/mail.ts) | Mail env vars are unset — every inquiry email is a no-op until fixed. |
+| `inquiry notification failed` / `inquiry email-status update failed` | [app/api/inquiries/route.ts](../app/api/inquiries/route.ts) | Resend rejected a send, or the status write after it failed — the inquiry itself is still saved (also visible per-row via `InquiryEmailAlert` in the comment log). |
+| `edit save failed for …` / `reorder failed for …` | [app/api/admin/artworks/route.ts](../app/api/admin/artworks/route.ts) | A Cloudinary write from the admin bulk save failed — the edit stays staged for retry, but worth knowing if it's frequent. |
+| `forwardEvents: …` | [lib/collector.ts](../lib/collector.ts) | The event forward to the EC2 collector failed or returned non-2xx (best-effort — never affects the visitor). |
+| `health: database check failed` | [app/api/health/route.ts](../app/api/health/route.ts) | What flips `/api/health` to `503` — the uptime checker above should already be catching this, this line is what confirms *why* in the logs. |
+
+None of these currently page anyone — they're what to `grep`/search for by hand, or what a log
+drain / alerting rule should watch for once one exists.
+
+### Error tracking — recommended next step, not done here
+
+No Sentry (or equivalent) is wired in, and this document doesn't add one. Picking a provider,
+creating an account, and deciding what PII policy applies to captured errors (inquiry emails and
+messages could easily end up in a stack trace or breadcrumb) is an **owner decision**, not a
+default this runbook should make for them. When that decision is made, the natural integration
+points are: wrap the route handlers' `catch` blocks (a thin call alongside the existing
+`console.error`, not a replacement — keep the terse client response as-is), and the two Python
+services' own exception handlers (`embed/main.py` already has a global one; `collector/main.py`
+does not). Until then, the table above is the manual equivalent.
