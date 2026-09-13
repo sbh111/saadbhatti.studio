@@ -45,6 +45,16 @@ export default function ArtworkCaption({
   const [vals, setVals] = useState<Fields>(original);
 
   // Re-seed from the staged store on hydration and after Discard (syncSignal).
+  // Deliberately omits `getStaged`, `publicId`, and `original` — `original` is
+  // rebuilt from props on every render, so listing it would reseed on every
+  // render instead of only on the intended syncSignal trigger. The real hazard:
+  // AdminProvider's `saveAll` bumps `syncSignal` and calls `router.refresh()`
+  // in the same tick, but the refresh is async — this effect fires immediately
+  // and closes over the PRE-refresh `original` (the old contextTitle/
+  // metaFields), and nothing re-triggers it once the refreshed props actually
+  // arrive. A save that changes this artwork's own fields can therefore appear
+  // not to have taken effect until some later, unrelated syncSignal bump
+  // (another save, or Discard). See docs/tech-debt.md 4.1.
   useEffect(() => {
     setVals(getStaged(publicId) ?? original);
     // eslint-disable-next-line react-hooks/exhaustive-deps
