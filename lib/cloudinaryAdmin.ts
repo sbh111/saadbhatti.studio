@@ -1,5 +1,6 @@
 import { CLOUD_NAME } from "./cloudinary";
 import { CATALOG_CACHE_TAG, CATALOG_REVALIDATE_SECONDS } from "./constants";
+import { stripReorderPrefix } from "./slug";
 
 /**
  * Low-level authenticated Cloudinary Admin API client — everything that can
@@ -219,10 +220,12 @@ type ReorderResult =
  *
  * Order = alphabetical display_name, so position N gets a zero-padded prefix
  * (uniform width within the collection: max(2, digits(count))). The original
- * suffix is preserved by stripping any existing leading digits with the same
- * regex prettifyFilename uses. Applied SEQUENTIALLY (rate-limit-friendly,
- * deterministic partial state) and no-ops are skipped, so a partial failure
- * leaves the reorder staged and re-saving recomputes + heals — idempotent.
+ * suffix is preserved by stripping any existing leading digits with
+ * `stripReorderPrefix` (lib/slug.ts) — the SAME helper the catalog read side
+ * uses to derive the URL slug, so renumbering here can never change a slug
+ * (tech debt 1.8). Applied SEQUENTIALLY (rate-limit-friendly, deterministic
+ * partial state) and no-ops are skipped, so a partial failure leaves the
+ * reorder staged and re-saving recomputes + heals — idempotent.
  */
 export async function reorderCollection(
   collectionPath: string,
@@ -267,10 +270,7 @@ export async function reorderCollection(
     for (let i = 0; i < orderedPublicIds.length; i++) {
       const publicId = orderedPublicIds[i];
       const prefix = String(i + 1).padStart(width, "0");
-      const suffix = (currentName.get(publicId) ?? publicId).replace(
-        /^\d+[-_ ]*/,
-        ""
-      );
+      const suffix = stripReorderPrefix(currentName.get(publicId) ?? publicId);
       const nextName = `${prefix}-${suffix}`;
       if (nextName === currentName.get(publicId)) continue;
       await updateDisplayName(publicId, nextName);

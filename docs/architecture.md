@@ -35,8 +35,12 @@ Cloudinary folders            →   Site
 ─────────────────────────────────────────────────────
 /photography            (root folder)   →  a medium      → /photography
 /photography/SouthWest  (subfolder)     →  a collection  → /photography/southwest
-  01-colorado_iejdgb.jpg (asset)        →  an artwork    → …/southwest#01-colorado-iejdgb
+  01-colorado_iejdgb.jpg (asset)        →  an artwork    → …/southwest#colorado-iejdgb
 ```
+
+(The `01-` order prefix is stripped before the slug is derived — see "How the
+catalog is derived" below — so a link to `#colorado-iejdgb` keeps working even
+after the artwork is renumbered to `02-`, `03-`, etc.)
 
 Add a root folder in Cloudinary and a new medium appears in the sidebar. Nothing
 in the code is medium-specific — `photography` and `paintings` are not named
@@ -163,6 +167,7 @@ point. If you need a constant on both sides, it goes in `inquiryLimits.ts`.
 | Membership | Assets whose `asset_folder` is `<medium>/<collection>`. |
 | Order | `localeCompare` on `display_name` — hence the `NN-` prefixes. |
 | Name | Context `Title Name` → `caption` → prettified filename (strips `NN-`, dashes → spaces). |
+| Slug (`#anchor`) | `slugify(display_name)` with the `NN-` prefix stripped FIRST (`lib/slug.ts`), so reordering never changes it. Empty after stripping → slug of `public_id`. Collisions within a collection are ranked by `public_id` and suffixed `-2`, `-3`, … — never by display order. |
 | Metadata | Context keys `Film`, `Medium`, `Dimensions`, `Year` (`METADATA_FIELDS` in `lib/artworkFields.ts`), whichever exist, in that order. |
 | Cover | First artwork. |
 | Aspect | Cloudinary `width/height` — reserves layout space to avoid shift. |
@@ -172,6 +177,16 @@ so `public_id` is an opaque, stable string (`01-muyThai_s2deee`), the folder is 
 `asset_folder` *attribute*, and the filename is `display_name`. Public ids are not
 paths and don't change when you rename or move an asset — which is exactly why
 they're used as the stable key everywhere.
+
+**Legacy anchors.** Slugs only became reorder-stable after tech debt 1.8; a link
+sent before that fix (an inquiry-notification email, a row in the admin comment
+log, a bookmarked search/like snapshot) can still carry the old `NN-`-prefixed
+form. `components/LegacyHashResolver.tsx`, mounted on
+`/[medium]/[collection]`, resolves this client-side: on mount and on
+`hashchange`, if the current hash matches no element on the page, it strips a
+leading `\d+-` and tries again, scrolling to and `replaceState`-ing onto the
+canonical hash if that resolves. The pure matching logic is
+`resolveLegacyHash` in `lib/slug.ts`.
 
 ---
 
@@ -473,6 +488,10 @@ Missing-credential errors are raised deliberately with instructions
 8. **Never delete Cloudinary assets** — that's the real, only copy of production
    artwork data.
 9. **`inquiryLimits.ts` stays import-free** of anything server-only.
+10. **Slugs must stay reorder-stable.** An artwork's `#anchor` is derived with
+    the `NN-` reorder prefix stripped (`lib/slug.ts`), so renumbering a
+    collection never changes it — every place that computes a slug from a
+    filename must go through `lib/slug.ts`'s helpers, not a local regex.
 
 ---
 

@@ -8,6 +8,7 @@ import {
   getCatalogMedium,
 } from "@/lib/catalog";
 import ArtworkBlock from "@/components/ArtworkBlock";
+import LegacyHashResolver from "@/components/LegacyHashResolver";
 import ReorderableArtworkList from "@/components/ReorderableArtworkList";
 import ReorderPanel from "@/components/ReorderPanel";
 
@@ -45,6 +46,9 @@ export default async function CollectionView({
     // stack. The panel renders null for visitors, leaving the main column full
     // width — logged-out layout is unchanged.
     <div className="flex">
+      {/* Resolves pre-reorder-fix "#NN-slug" links (old emails, comment log,
+          search/like snapshots) to the current, reorder-stable anchor. */}
+      <LegacyHashResolver />
       <div className="min-w-0 grow pb-10">
         <header className="px-[30px] pb-5 pt-[34px]">
           <h1 className="font-pixel text-xl leading-relaxed text-ink">

@@ -123,6 +123,11 @@ which is the join key for every other subsystem.
 - **`public_id` is the only stable artwork key.** Titles, filenames, and folders can all change;
   `public_id` never does. Every foreign reference in Postgres — inquiries, likes, embeddings —
   stores that and nothing else.
+- **The URL slug is reorder-stable too** (`lib/slug.ts`, tech debt 1.8). It's `slugify(display_name)`
+  with the `NN-` order prefix stripped first, so renumbering a collection never changes an
+  artwork's `#anchor` — only `public_id` used to be that stable; the slug wasn't, and every past
+  reorder broke every link ever shared. `components/LegacyHashResolver.tsx` resolves old,
+  prefixed hashes client-side for links sent before this fix.
 - **Image delivery is Cloudinary's job, not Next's.** A raw `<img>` with hand-built URLs
   (`f_auto,q_auto,c_limit` capped at 2048px, a four-width `srcset`, and a 16px blurred
   placeholder as a CSS background) rather than `next/image`, since the CDN already does the

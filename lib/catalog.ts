@@ -1,6 +1,12 @@
 import { cache } from "react";
 import { METADATA_FIELDS, TITLE_KEYS } from "./artworkFields";
 import { apiGet, fetchAllPages } from "./cloudinaryAdmin";
+import {
+  baseArtworkSlug,
+  disambiguateSlugs,
+  slugify,
+  stripReorderPrefix,
+} from "./slug";
 
 /**
  * Cloudinary is the source of truth for ALL artwork structure (Pattern A).
@@ -14,6 +20,12 @@ import { apiGet, fetchAllPages } from "./cloudinaryAdmin";
  * - order:       alphabetical by display_name — prefix files 01-, 02-, …
  * - name:        contextual metadata "Title Name" (falls back to the built-in
  *                Title/caption, then to a prettified display_name)
+ * - slug:        the URL anchor — derived from display_name with the 01-
+ *                order prefix STRIPPED (lib/slug.ts), so reordering a
+ *                collection never changes an artwork's shared link
+ *                (tech debt 1.8). See lib/slug.ts for the fallback and
+ *                collision rules, and docs/architecture.md §4/§13 for the
+ *                invariant.
  * - metadata:    whichever of lib/artworkFields.ts's METADATA_FIELDS are
  *                present render, in that order — the field list (and each
  *                field's alias chain) is defined there ONCE and shared with
@@ -81,16 +93,9 @@ function contextValue(
   return undefined;
 }
 
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 function prettifyFilename(basename: string): string {
   return (
-    basename.replace(/^\d+[-_ ]*/, "").replace(/[-_]+/g, " ").trim() || basename
+    stripReorderPrefix(basename).replace(/[-_]+/g, " ").trim() || basename
   );
 }
 
@@ -128,21 +133,32 @@ async function fetchCollection(
       (cursor ? `&next_cursor=${encodeURIComponent(cursor)}` : ""),
     (page) => ({ items: page.resources ?? [], next_cursor: page.next_cursor })
   );
-  const artworks = allResources
-    .map((resource) => {
-      const filename =
-        resource.display_name ??
-        resource.public_id.split("/").pop() ??
-        resource.public_id;
-      return { resource, filename };
-    })
+  const withFilenames = allResources.map((resource) => {
+    const filename =
+      resource.display_name ??
+      resource.public_id.split("/").pop() ??
+      resource.public_id;
+    return { resource, filename };
+  });
+  // Slugs are derived — and disambiguated — independently of display order:
+  // computing them from the full unsorted set (keyed by public_id, ranked by
+  // public_id on collision) means a reorder can never change which artwork
+  // gets which slug, only the order artworks are emitted in below.
+  const slugByPublicId = disambiguateSlugs(
+    withFilenames.map(({ resource, filename }) => ({
+      publicId: resource.public_id,
+      baseSlug: baseArtworkSlug(filename, resource.public_id),
+    }))
+  );
+  const artworks = withFilenames
     .sort((a, b) => a.filename.localeCompare(b.filename))
     .map(({ resource, filename }) => {
       const contextTitle =
         contextValue(resource, ...TITLE_KEYS) ?? "";
       const metaFields = metaFieldsOf(resource);
       return {
-        slug: slugify(filename),
+        // Non-null: every resource here was just fed into disambiguateSlugs above.
+        slug: slugByPublicId.get(resource.public_id)!,
         name: contextTitle || prettifyFilename(filename),
         image: resource.public_id,
         aspect:
