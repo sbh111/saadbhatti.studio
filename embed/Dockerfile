@@ -9,13 +9,18 @@ WORKDIR /app
 ENV HF_HOME=/opt/hf-cache
 ENV TRANSFORMERS_NO_ADVISORY_WARNINGS=1
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install from the LOCK file (full transitive pins, CPU-only torch verified —
+# see its header) for a reproducible build. requirements.txt is still copied in
+# for reference/for anyone rebuilding the lock; it's not what gets installed.
+COPY requirements.txt requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 
 # Pre-download the model at build time (pinned in main.py); ON THE SAME variant the
 # site's JS text encoder uses, so image and query vectors share one space.
-RUN python -c "from transformers import CLIPModel, CLIPProcessor; \
-    CLIPModel.from_pretrained('openai/clip-vit-base-patch32'); \
+# Vision tower only (CLIPVisionModelWithProjection) — see the comment in
+# main.py above _load_model() for why, and how that was verified safe.
+RUN python -c "from transformers import CLIPProcessor, CLIPVisionModelWithProjection; \
+    CLIPVisionModelWithProjection.from_pretrained('openai/clip-vit-base-patch32'); \
     CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')"
 
 COPY main.py .
