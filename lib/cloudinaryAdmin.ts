@@ -54,27 +54,62 @@ function escapeContext(value: string): string {
 }
 
 /**
+ * One form field's update: its full read chain (the same chain
+ * `lib/catalog.ts` reads through — canonical key first, aliases after) and
+ * the new value. `""` means "the admin cleared this field."
+ */
+export interface ContextFieldUpdate {
+  keys: readonly string[];
+  value: string;
+}
+
+/**
+ * Pure read-modify-write merge behind `updateArtworkContext`, split out so it
+ * is unit-testable without touching the network (mock fetch to test the
+ * function that calls this instead).
+ *
+ * Setting a field (non-empty value) writes ONLY its canonical — first —
+ * key. Aliases are left untouched: the read chain already tries the
+ * canonical key first, so nothing needs deleting for it to win.
+ *
+ * Clearing a field (empty value) deletes EVERY key in its chain. Deleting
+ * only the canonical key isn't enough: an untouched alias (a leftover
+ * `caption`, a lowercase `film`) would resurface through the read-side
+ * fallback the moment the canonical key is gone — the exact bug in tech
+ * debt 3.2. The chain is, by definition, "every spelling of this field," so
+ * clearing it means removing all of them.
+ */
+export function mergeContext(
+  current: Record<string, string>,
+  fields: ContextFieldUpdate[]
+): Record<string, string> {
+  const merged = { ...current };
+  for (const { keys, value } of fields) {
+    const trimmed = value.trim();
+    if (trimmed) {
+      merged[keys[0]] = trimmed;
+    } else {
+      for (const key of keys) delete merged[key];
+    }
+  }
+  return merged;
+}
+
+/**
  * Update an asset's contextual metadata. Cloudinary's update endpoint REPLACES
  * the entire custom context (verified empirically), so this reads the current
- * context first and merges: form keys overlay existing keys; a key set to ""
- * is dropped (deleted); unrelated keys (e.g. alt/Description) are preserved.
+ * context first and merges via `mergeContext` (see above); unrelated keys
+ * (e.g. alt/Description) are preserved either way.
  */
 export async function updateArtworkContext(
   publicId: string,
-  fields: Record<string, string>
+  fields: ContextFieldUpdate[]
 ): Promise<void> {
   const current = await apiGetFresh<{
     context?: { custom?: Record<string, string> };
   }>(`/resources/image/upload/${encodeURIComponent(publicId)}`);
 
-  const merged: Record<string, string> = {
-    ...(current.context?.custom ?? {}),
-  };
-  for (const [key, value] of Object.entries(fields)) {
-    const trimmed = value.trim();
-    if (trimmed) merged[key] = trimmed;
-    else delete merged[key];
-  }
+  const merged = mergeContext(current.context?.custom ?? {}, fields);
 
   const contextParam = Object.entries(merged)
     .map(([k, v]) => `${escapeContext(k)}=${escapeContext(v)}`)

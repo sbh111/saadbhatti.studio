@@ -66,7 +66,22 @@ interface CloudinaryFolder {
   path: string;
 }
 
-/** Contextual metadata rendered for any medium, in this order, blanks skipped */
+/**
+ * All context keys the title is read from, in read-priority order — every
+ * historical "spelling" of the same logical field. The first entry is
+ * canonical: the only key the admin write path ever sets. Clearing the title
+ * must delete every key here, or an old alias (e.g. a stray `caption`) would
+ * resurface through the fallback below (tech debt 3.2).
+ */
+export const TITLE_KEYS: readonly string[] = ["Title Name", "caption", "Title", "title"];
+
+/**
+ * Contextual metadata rendered for any medium, in this order, blanks skipped.
+ * Each entry is `[label, ...contextKeys]` — the same shape/reasoning as
+ * `TITLE_KEYS`: `contextKeys` is that field's full read chain (canonical key
+ * first), so `Film` clearing has to delete both `Film` and `film`, not just
+ * the canonical one.
+ */
 export const META_KEYS: [label: string, ...contextKeys: string[]][] = [
   ["Film", "Film", "film"],
   ["Medium", "Medium", "medium"],
@@ -132,7 +147,7 @@ async function fetchCollection(
     .sort((a, b) => a.filename.localeCompare(b.filename))
     .map(({ resource, filename }) => {
       const contextTitle =
-        contextValue(resource, "Title Name", "caption", "Title", "title") ?? "";
+        contextValue(resource, ...TITLE_KEYS) ?? "";
       const metaFields = metaFieldsOf(resource);
       return {
         slug: slugify(filename),
