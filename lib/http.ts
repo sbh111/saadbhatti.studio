@@ -15,6 +15,11 @@ import { NextResponse } from "next/server";
  * A route that needs more than trimming/bounding a string — the search query
  * normalizer, the per-event validator in lib/eventTypes-adjacent code — keeps
  * its own function, built out of `str`/`boundedStr` where that's natural.
+ *
+ * `readCappedText` is a separate concern (bounding a request body BEFORE it's
+ * parsed at all) — currently adopted only by the search route, the one place
+ * an unbounded body was actually exploitable, but written here so any other
+ * route can reach for it too.
  */
 
 /** 400 — malformed shape, or a field outside its bounds. */
@@ -56,4 +61,48 @@ export function str(v: unknown): string {
 export function boundedStr(v: unknown, max: number): string | undefined {
   const t = str(v);
   return t.length >= 1 && t.length <= max ? t : undefined;
+}
+
+/**
+ * Reads a request body as text, capped at `maxBytes`, without ever buffering
+ * more than that — a route with no default body-size limit (every route
+ * handler here) would otherwise fully read/parse/scan whatever an
+ * unauthenticated caller sends before any real validation runs (tech debt
+ * 3.3). `Content-Length` is checked first as a cheap early-out, but is NOT
+ * trusted alone — it can be absent (chunked transfer) or simply wrong — so
+ * the stream itself is read incrementally and cancelled the moment it
+ * exceeds the cap, before the whole body is ever assembled.
+ *
+ * @returns the body text, or `null` if it is (or turns out to be) oversized.
+ */
+export async function readCappedText(
+  request: Request,
+  maxBytes: number
+): Promise<string | null> {
+  const declared = request.headers.get("content-length");
+  if (declared && Number(declared) > maxBytes) return null;
+
+  const reader = request.body?.getReader();
+  if (!reader) return "";
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }

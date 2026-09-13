@@ -281,9 +281,9 @@ trusts only platform-set headers and, failing that, the *rightmost* hop.
   events forward all produce no row. A dedicated counter covers them.
 - **Fail *open*.** If the limiter's own query fails, the request proceeds — *"a flood is a
   lesser harm than an outage."*
-- **Cheapest checks first.** Ordering is load-bearing on `/api/search`: parse → sanitize →
-  per-IP → global → *only then* run ML inference, so throttled requests never reach the
-  expensive step.
+- **Cheapest checks first.** Ordering is load-bearing on `/api/search`: capped body read →
+  parse → raw-length bound → sanitize → per-IP → global → *only then* run ML inference, so an
+  oversized or throttled request never reaches the expensive step (or even a full sanitize pass).
 - **Per-IP plus global.** Per-IP is a fairness control; it can't see a botnet. Global ceilings
   bound total cost for the two paths that cost real money — email sends and inference.
 

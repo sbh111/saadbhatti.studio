@@ -73,6 +73,29 @@ describe("POST /api/search", () => {
     expect(embedText).not.toHaveBeenCalled();
   });
 
+  it("rejects an oversized body with 400, before it's even parsed as JSON", async () => {
+    // Comfortably over the route's 4 KiB body cap — big enough that if this
+    // were parsed/sanitized instead of rejected up front, it'd also trip the
+    // raw-query bound below, but the point of this test is that it never
+    // gets that far: the byte cap is checked before JSON.parse.
+    const res = await POST(req({ query: "a".repeat(20_000) }));
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "invalid" });
+    expect(rateLimited).not.toHaveBeenCalled();
+    expect(embedText).not.toHaveBeenCalled();
+  });
+
+  it("returns empty results for a raw query over the raw bound, without normalizing", async () => {
+    // Under the 4 KiB body cap, but over the route's RAW_QUERY_MAX_CHARS (a
+    // generous multiple of QUERY_MAX_CHARS — not exported, so mirrored here)
+    // — this must be rejected before sanitize()'s normalize/regex passes run.
+    const res = await POST(req({ query: "a".repeat(QUERY_MAX_CHARS * 10 + 1) }));
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({ results: [] });
+    expect(rateLimited).not.toHaveBeenCalled();
+    expect(embedText).not.toHaveBeenCalled();
+  });
+
   it("strips control characters and collapses whitespace before encoding", async () => {
     const raw = "  Sunset\x00\x07 over    the\x1F ocean  ";
     const res = await POST(req({ query: raw }));
