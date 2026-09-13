@@ -31,11 +31,45 @@ export async function isRateLimited(
       update: { count: { increment: 1 } },
     });
     return row.count > max;
-  } catch {
+  } catch (err) {
     // Fail OPEN: the safeguard must never take the site down for a real visitor
     // because of a transient DB hiccup. A flood is a lesser harm than an outage.
+    // But failing open silently means a degraded DB disables every rate limit
+    // on the site (search's inference-cost ceiling included) with nothing
+    // anywhere recording that it happened — so log it, matching settings.ts's
+    // equivalent read failure.
+    warnRateLimitFailure(bucket, err instanceof Error ? err.message : String(err));
     return false;
   }
+}
+
+// A real DB outage means EVERY call above hits the catch — logging on each
+// would flood Vercel's (short-retention) logs with one identical line per
+// request for the duration of the outage, burying the one fact that matters
+// ("it's down") under volume. Log at most once per instance per window and
+// fold whatever else happened in between into a suppressed-count on the next
+// line that does log, so the operator still learns how bad it was.
+const WARN_THROTTLE_MS = 60_000;
+let lastWarnAt = -Infinity;
+let suppressedSinceLastWarn = 0;
+
+function warnRateLimitFailure(bucket: string, message: string): void {
+  const now = Date.now();
+  if (now - lastWarnAt < WARN_THROTTLE_MS) {
+    suppressedSinceLastWarn++;
+    return;
+  }
+  const suffix =
+    suppressedSinceLastWarn > 0
+      ? ` (${suppressedSinceLastWarn} more suppressed in the last minute)`
+      : "";
+  suppressedSinceLastWarn = 0;
+  lastWarnAt = now;
+  // Never log ipHash here — this line is meant to be safe to alert on/read
+  // broadly, and the bucket name is all an operator needs to know what's hit.
+  console.warn(
+    `isRateLimited: DB error for bucket "${bucket}", failing open: ${message}${suffix}`
+  );
 }
 
 /**

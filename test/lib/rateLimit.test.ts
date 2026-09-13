@@ -84,3 +84,51 @@ describe("isRateLimited", () => {
     );
   });
 });
+
+describe("isRateLimited DB-failure logging (tech debt 2.6)", () => {
+  // Each test gets a fresh module instance so the module-level throttle state
+  // (lastWarnAt / suppressedSinceLastWarn) doesn't leak between tests — the
+  // vi.mock("@/lib/db") factory closes over the shared `upsert` fn above, so
+  // resetting the module registry doesn't lose control over it.
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    upsert.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("logs the bucket and error message, never the ipHash", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { isRateLimited: fresh } = await import("@/lib/rateLimit");
+    upsert.mockRejectedValue(new Error("connection refused"));
+
+    await fresh("search", "super-secret-ip-hash", 5, 60_000);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = warn.mock.calls[0][0] as string;
+    expect(line).toContain("search");
+    expect(line).toContain("connection refused");
+    expect(line).not.toContain("super-secret-ip-hash");
+  });
+
+  it("throttles repeated failures to one log line per minute, folding the rest into a count", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { isRateLimited: fresh } = await import("@/lib/rateLimit");
+    upsert.mockRejectedValue(new Error("timeout"));
+
+    await fresh("like", "ip", 5, 60_000); // first ever failure: logs
+    await fresh("like", "ip", 5, 60_000); // within the throttle window: suppressed
+    await fresh("like", "ip", 5, 60_000); // ditto
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(60_000);
+    await fresh("like", "ip", 5, 60_000); // window elapsed: logs again, with a count
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[1][0] as string).toContain(
+      "2 more suppressed in the last minute"
+    );
+  });
+});
