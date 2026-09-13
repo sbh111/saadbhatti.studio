@@ -54,7 +54,7 @@ model Inquiry {
 // avoids a count-then-write race. `ipHash` may be a pseudo-key like "__global__"
 // for site-wide limits. Old windows are inert; sweep occasionally by windowStart.
 model RateWindow {
-  bucket      String   @db.VarChar(64) // "like" | "inquiry" | "events"
+  bucket      String   @db.VarChar(64) // "like" | "events" | "search" | "search_global" | "inquiry" | "inquiry_email"
   ipHash      String   @db.VarChar(64) // salted IP hash, or a global pseudo-key
   windowStart DateTime
   count       Int      @default(0)
@@ -76,8 +76,9 @@ model Setting {
 
 // A "like" on an artwork — the one explicit interest signal. Durable and
 // independent of the (toggleable) Kafka stream. Deduped one-per-visitor by the
-// same salted IP hash as inquiries; the unique constraint doubles as the rate
-// limit. Referenced by Cloudinary public_id only (the stable-key invariant).
+// same salted IP hash as inquiries via the unique constraint below; throughput
+// is rate-limited separately, by the "like" bucket in RateWindow. Referenced by
+// Cloudinary public_id only (the stable-key invariant).
 model Like {
   id              String   @id @default(cuid())
   artworkPublicId String   @db.VarChar(255)

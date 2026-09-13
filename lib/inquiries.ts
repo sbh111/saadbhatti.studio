@@ -5,8 +5,11 @@ import { RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from "./inquiryLimits";
 /**
  * Server-only inquiry helpers: IP hashing (we never store a raw IP) and the
  * DB-backed rate limit. Kept out of the client bundle — pulls in the DB layer
- * transitively via lib/rateLimit. The public POST handler
- * (app/api/inquiries/route.ts) is the sole caller.
+ * transitively via lib/rateLimit. `isRateLimited` here is inquiry-specific and
+ * used only by app/api/inquiries/route.ts, but `hashIp` and `clientIpOf` are
+ * the shared per-IP building blocks for every public write path (likes,
+ * events, search, inquiries) — `clientIpOf` in particular is the spoofing
+ * guard behind all of them, so treat it as broad-blast-radius, not local.
  */
 
 /** Salted sha256 of an IP — never the raw address. */
