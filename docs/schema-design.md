@@ -255,7 +255,8 @@ Every query in the codebase, and the index that serves it.
 |---|---|---|---|---|
 | `inquiries` | `create` | — | — | hot |
 | `inquiries` | `update` (email outcome) | `id` | PK | background |
-| `inquiries` | `findMany` | `ORDER BY createdAt DESC LIMIT 200` | `inquiries_createdAt_idx` | admin |
+| `inquiries` | `findMany` | `ORDER BY createdAt DESC LIMIT 50 OFFSET …` | `inquiries_createdAt_idx` | admin |
+| `inquiries` | `count` | none | full scan | admin |
 | `inquiries` | `findUnique` / `update` / `delete` | `id` | PK | admin |
 | `likes` | `create` | uniqueness check | `likes_artworkPublicId_ipHash_key` | hot |
 | `likes` | `deleteMany` | `artworkPublicId, ipHash` | `likes_artworkPublicId_ipHash_key` | hot |

@@ -24,14 +24,40 @@ export const metadata: Metadata = {
 // explicitly as documentation-of-intent (nothing here is cacheable).
 export const dynamic = "force-dynamic";
 
-const PAGE_SIZE = 200;
+const PAGE_SIZE = 50;
 
-export default async function CommentLogPage() {
+/**
+ * Offset pagination, not keyset: this table holds sales leads, not a firehose —
+ * even a busy year is a few thousand rows, so `skip`/`take` never has enough
+ * rows ahead of it to make the extra offset scan cost anything measurable. In
+ * exchange it gets arbitrary page numbers (jump to page 6, not just "next"),
+ * which a `?page=` link needs to survive being pasted, refreshed, or bookmarked
+ * across admin sessions — a cursor would have to be threaded through instead.
+ */
+function parsePage(raw: string | undefined): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : 1;
+}
+
+export default async function CommentLogPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   if (!(await isAdmin())) redirect("/admin/login");
+
+  const { page: rawPage } = await searchParams;
+  const total = await prisma.inquiry.count();
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Garbage or out-of-range input (a stale bookmark after deletes shrink the
+  // table, a hand-edited URL) clamps back into range rather than rendering an
+  // empty page or erroring.
+  const page = Math.min(parsePage(rawPage), pageCount);
 
   const [inquiries, index] = await Promise.all([
     prisma.inquiry.findMany({
       orderBy: { createdAt: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
     }),
     getArtworkIndex(),
@@ -43,9 +69,9 @@ export default async function CommentLogPage() {
         comment log
       </h1>
       <p className="mt-1 text-[13px] text-ink-faint">
-        {inquiries.length === 0
+        {total === 0
           ? "No inquiries yet."
-          : `${inquiries.length} inquir${inquiries.length === 1 ? "y" : "ies"}`}
+          : `${total} inquir${total === 1 ? "y" : "ies"} · page ${page} of ${pageCount}`}
       </p>
 
       <ul className="mt-6 flex flex-col gap-3">
@@ -137,10 +163,32 @@ export default async function CommentLogPage() {
         })}
       </ul>
 
-      {inquiries.length === PAGE_SIZE && (
-        <p className="mt-6 text-[13px] text-ink-faint">
-          Showing latest {PAGE_SIZE}.
-        </p>
+      {pageCount > 1 && (
+        <div className="mt-6 flex items-center justify-between border-t border-hairline pt-3 text-[13px]">
+          {page > 1 ? (
+            <Link
+              href={`/admin/comments?page=${page - 1}`}
+              className="text-ink-faint hover:text-steel"
+            >
+              ← newer
+            </Link>
+          ) : (
+            <span className="text-ink-faint opacity-40">← newer</span>
+          )}
+          <span className="text-ink-faint">
+            page {page} of {pageCount}
+          </span>
+          {page < pageCount ? (
+            <Link
+              href={`/admin/comments?page=${page + 1}`}
+              className="text-ink-faint hover:text-steel"
+            >
+              older →
+            </Link>
+          ) : (
+            <span className="text-ink-faint opacity-40">older →</span>
+          )}
+        </div>
       )}
     </div>
   );

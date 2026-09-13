@@ -496,7 +496,8 @@ The Phase D substrate was built to be reused:
 
 - **No unread badge** on the admin nav: it would put a DB query on every session
   re-check. A `/api/admin/inquiries/count` endpoint is the intended fix.
-- **The comment log caps at 200 rows** with a footnote; pagination is deferred.
+- **The comment log is paginated** (offset-based, 50 rows/page — tech-debt.md 2.7); no filter or
+  search yet.
 - **Untitled artworks** display a filename-derived name (`muyThai s2deee`), which
   is what the comment log will show until a `Title Name` context value is set.
 - **Email notification on new inquiries has shipped** (Resend, best-effort,
