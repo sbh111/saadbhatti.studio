@@ -88,8 +88,18 @@ Next.js reads both. Copy `.env.example` to `.env` (the committed local Docker
 URLs work as-is) and add `IP_HASH_SALT` to `.env.local` (see
 `.env.local.example`).
 
+The local `db` image is `pgvector/pgvector:pg16`, not plain `postgres:16-alpine` —
+`prisma/migrations` includes `CREATE EXTENSION IF NOT EXISTS vector` (the CLIP search
+feature's storage), and a vanilla Postgres image doesn't ship that extension at all;
+`npx prisma migrate dev` used to fail on a fresh clone with `extension "vector" is not
+available` (tech-debt 1.2). If you have an **existing** local volume created before this
+switch, Postgres may log a collation-version mismatch warning when it starts under the
+new (Debian-based, not Alpine/musl) image — the clean fix is `docker compose down -v`
+(wipes the local volume; your data is disposable dev data, not anything to migrate) and
+recreating it fresh with `npx prisma migrate dev`.
+
 ```bash
-docker compose up -d              # start Postgres 16 (container sbh-studio-db, :5432)
+docker compose up -d              # start Postgres 16 + pgvector (container sbh-studio-db, :5432)
 npx prisma migrate dev            # first run: create tables from prisma/migrations
 npm run dev                       # http://localhost:3000
 

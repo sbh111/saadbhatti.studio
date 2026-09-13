@@ -340,8 +340,8 @@ actually grows):
 1. Run `scripts/backup-db.sh` against production (the DIRECT URL) and confirm the dump file
    size looks sane compared to last time.
 2. Spin up a scratch Postgres (local Docker is fine) with the `vector` extension available —
-   `pgvector/pgvector:pg16`, not the plain `postgres:16-alpine` image this repo's local compose
-   currently uses (see tech-debt 1.2).
+   this repo's local compose already uses `pgvector/pgvector:pg16` for exactly this reason
+   (tech-debt 1.2); a bare `postgres:16-alpine` doesn't ship the extension at all.
 3. `pg_restore` the dump into it, end to end, with no manual patching.
 4. Spot-check: row counts per table roughly match Neon; a known recent inquiry is present with
    the right `artworkPublicId`/`email`; a `SELECT ... <=> ...` query against

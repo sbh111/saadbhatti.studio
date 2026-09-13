@@ -10,7 +10,16 @@
 # ordinary development never starts any of them.
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16, NOT plain postgres:16-alpine (tech debt 1.2):
+    # migration 5 runs `CREATE EXTENSION IF NOT EXISTS vector` for the CLIP
+    # search feature, and the vanilla Postgres image doesn't ship that
+    # extension at all — `npx prisma migrate dev` fails there with
+    # `extension "vector" is not available`. This image is itself just the
+    # official postgres:16 (Debian, not alpine) with pgvector built in, so the
+    # PGDATA default/env vars/healthcheck below are unchanged. See the
+    # README's "Local database" section if you have an EXISTING volume that
+    # predates this switch.
+    image: pgvector/pgvector:pg16
     container_name: sbh-studio-db
     restart: unless-stopped
     environment:
