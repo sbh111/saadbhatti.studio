@@ -8,6 +8,7 @@ import { content } from "@/lib/content";
 import { prisma } from "@/lib/db";
 import DeleteInquiryButton from "@/components/DeleteInquiryButton";
 import InquiryEmailAlert from "@/components/InquiryEmailAlert";
+import LocalTime from "@/components/LocalTime";
 import {
   deleteInquiryAction,
   resendInquiryEmailAction,
@@ -24,11 +25,6 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 200;
-
-const dateFmt = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
 
 export default async function CommentLogPage() {
   if (!(await isAdmin())) redirect("/admin/login");
@@ -99,7 +95,7 @@ export default async function CommentLogPage() {
                     >
                       {inquiry.email}
                     </a>{" "}
-                    · {dateFmt.format(inquiry.createdAt)}
+                    · <LocalTime date={inquiry.createdAt} />
                   </div>
                 </div>
               </div>
