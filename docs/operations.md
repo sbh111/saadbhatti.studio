@@ -52,8 +52,9 @@ move is not required to trigger one, though it's harmless to include it in a rou
 
 ### How to re-run
 
-Local dev (`docker-compose.yml`, host networking, defaults to the local dev site *and* the
-local database — see [§3 below](#3-dangerous-defaults) for why both are local by default):
+Local dev (`docker-compose.yml`, host networking). **Both** `CATALOG_INDEX_URL` and
+`EMBED_DATABASE_URL` default to local on purpose — plain `docker compose --profile embedding
+up` can never touch production by accident:
 
 ```bash
 docker compose --profile embedding up -d --build embed   # build once, or after requirements/main.py change
@@ -61,8 +62,20 @@ curl -XPOST localhost:8100/reindex -H "Authorization: Bearer $EMBED_TOKEN"
 docker compose down   # or: docker compose --profile embedding down
 ```
 
+Before committing to a real run — local or production — do a **dry run** first: it diffs the
+catalog against `artwork_embeddings` (no image fetch, no CLIP, no write) and reports how many
+artworks it would newly embed, refresh, or prune, plus the catalog/database host it resolved
+(logged either way, so a wrong default shows up before it matters):
+
+```bash
+curl -XPOST "localhost:8100/reindex?dry_run=true" -H "Authorization: Bearer $EMBED_TOKEN"
+```
+
 **A real production refresh** (new/changed artwork on the live site) needs BOTH env vars
-pointed at production, as an explicit opt-in — the defaults are local-only on purpose:
+pointed at production, as an explicit opt-in — the defaults are local-only on purpose. A local
+catalog against the production database (or the reverse) is not refused — there's one
+Cloudinary cloud, so a "mixed" target can be a deliberate, legitimate refresh, not just a
+mistake — but the dry run above is exactly how to confirm that's what you meant:
 
 ```bash
 EMBED_TOKEN=<the embedder's token>                                            \
@@ -70,6 +83,7 @@ CATALOG_INDEX_URL=https://www.saadbhatti.studio/api/catalog-index            \
 CATALOG_INDEX_TOKEN=<must equal CATALOG_INDEX_TOKEN in Vercel>                \
 EMBED_DATABASE_URL=<Neon DIRECT (non-pooled) URL — see docs/schema-design.md §8> \
 docker compose --profile embedding up -d --build embed
+curl -XPOST "localhost:8100/reindex?dry_run=true" -H "Authorization: Bearer $EMBED_TOKEN"  # confirm the target first
 curl -XPOST localhost:8100/reindex -H "Authorization: Bearer $EMBED_TOKEN"
 docker compose down
 ```
@@ -84,8 +98,10 @@ Env vars, in one place:
 | `EMBED_DATABASE_URL` | Where vectors are written. Prefer Neon's DIRECT (non-pooled) URL for a real refresh (see [schema-design.md §8](schema-design.md#8-operations)); local default is the compose `db` container. |
 
 Watch `docker compose logs -f embed` while it runs — every stage logs what it's doing, and a
-failure names the stage (config / catalog / database / model) rather than a bare 500. The
-response body also reports `indexed` / `pruned` / `failed` / `total` counts.
+failure names the stage (config / catalog / database / model) rather than a bare 500. Every
+response (dry run or real) echoes `catalogHost` / `databaseHost` / `dryRun`; a real run also
+reports `indexed` / `pruned` / `failed` / `total`, and a dry run reports `wouldEmbedNew` /
+`wouldRefresh` / `wouldPrune` / `total` instead.
 
 ### Drift detection
 

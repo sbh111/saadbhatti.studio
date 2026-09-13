@@ -16,6 +16,13 @@ a traceback to the container log (`docker compose logs -f embed`) and come back 
 a JSON body naming the stage and cause, rather than a bare 500. Per-image failures
 never abort the run — they're collected and reported.
 
+`/reindex` always logs (and echoes back) the catalog/database HOST it resolved to
+— never credentials — so a defaulted-wrong env var is visible, not silent (see
+docker-compose.yml). `?dry_run=true` computes what a run WOULD embed/prune —
+diffing the catalog against the table — without fetching a single image, calling
+CLIP, or writing anything; use it to sanity-check a target before committing to
+the real thing.
+
 Env:
   EMBED_TOKEN           bearer required to call /reindex
   CATALOG_INDEX_URL     e.g. https://saadbhatti.studio/api/catalog-index
@@ -30,6 +37,7 @@ import io
 import logging
 import os
 import time
+from urllib.parse import urlparse
 
 import httpx
 import numpy as np
@@ -202,6 +210,19 @@ def _embed_image(img: Image.Image) -> np.ndarray:
 
     norm = float(np.linalg.norm(vec)) or 1.0
     return vec / norm  # L2-normalized, matching the query side
+
+
+def _host_of(url_or_dsn: str) -> str:
+    """Hostname only, for logging/echoing a resolved target — never credentials.
+
+    Both CATALOG_INDEX_URL and EMBED_DATABASE_URL can carry a user:pass, and
+    both get logged at the start of every /reindex (see below) — this is the
+    one thing that's safe to show.
+    """
+    try:
+        return urlparse(url_or_dsn).hostname or "(unparseable)"
+    except ValueError:
+        return "(unparseable)"
 
 
 def _require_token(authorization: str) -> None:
@@ -386,10 +407,30 @@ def health() -> dict:
 
 
 @app.post("/reindex")
-def reindex(authorization: str = Header(default="")) -> dict:
+def reindex(authorization: str = Header(default=""), dry_run: bool = False) -> dict:
     _require_token(authorization)
 
-    if _model is None:
+    # Log — and echo back in the response — which catalog and which database
+    # this run targets, host only, never credentials. CATALOG_INDEX_URL and
+    # EMBED_DATABASE_URL both default local (docker-compose.yml) and both need
+    # an explicit override for a production refresh; this is the guard rail
+    # that makes a defaulted-wrong var visible instead of a silent cross-wire.
+    # A "mixed" target (e.g. a local catalog against the production DB) is NOT
+    # refused — there's one Cloudinary cloud, so that combination can be a
+    # deliberate, legitimate refresh, not just a mistake.
+    catalog_host = _host_of(os.environ.get("CATALOG_INDEX_URL", ""))
+    db_host = _host_of(os.environ.get("EMBED_DATABASE_URL", ""))
+    log.info(
+        "/reindex target — catalog host=%s, db host=%s%s",
+        catalog_host,
+        db_host,
+        " [DRY RUN — no writes]" if dry_run else "",
+    )
+    target = {"catalogHost": catalog_host, "databaseHost": db_host, "dryRun": dry_run}
+
+    # A dry run needs no model — it never embeds anything — so this check only
+    # applies to a real run.
+    if not dry_run and _model is None:
         raise StageError(
             "model",
             f"CLIP model failed to load: {_model_error}",
@@ -401,7 +442,35 @@ def reindex(authorization: str = Header(default="")) -> dict:
     public_ids = _fetch_public_ids()
     if not public_ids:
         log.warning("catalog is empty — nothing to embed, skipping prune")
-        return {"indexed": 0, "pruned": 0, "failed": [], "total": 0}
+        return {**target, "indexed": 0, "pruned": 0, "failed": [], "total": 0}
+
+    if dry_run:
+        # Read-only preview: no image fetch, no CLIP, no write — just compares
+        # the catalog's public_ids against what's already in the table, so a
+        # target (and the size of the run) can be sanity-checked before paying
+        # for the real thing.
+        with _connect_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT "publicId" FROM artwork_embeddings')
+                existing = {row[0] for row in cur.fetchall()}
+        catalog_ids = set(public_ids)
+        elapsed = time.monotonic() - started
+        log.info(
+            "dry run done in %.1fs — would embed new=%d refresh=%d prune=%d total=%d",
+            elapsed,
+            len(catalog_ids - existing),
+            len(catalog_ids & existing),
+            len(existing - catalog_ids),
+            len(public_ids),
+        )
+        return {
+            **target,
+            "wouldEmbedNew": len(catalog_ids - existing),
+            "wouldRefresh": len(catalog_ids & existing),
+            "wouldPrune": len(existing - catalog_ids),
+            "total": len(public_ids),
+            "elapsedSeconds": round(elapsed, 1),
+        }
 
     indexed, failed = 0, []
 
@@ -486,6 +555,7 @@ def reindex(authorization: str = Header(default="")) -> dict:
         len(public_ids),
     )
     return {
+        **target,
         "indexed": indexed,
         "pruned": pruned,
         "failed": failed,
