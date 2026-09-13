@@ -44,7 +44,6 @@ model Inquiry {
   createdAt       DateTime      @default(now())
 
   @@index([createdAt(sort: Desc)])
-  @@index([ipHash, createdAt])
   @@map("inquiries")
 }
 
@@ -86,7 +85,6 @@ model Like {
   createdAt       DateTime @default(now())
 
   @@unique([artworkPublicId, ipHash])
-  @@index([artworkPublicId])
   @@map("likes")
 }
 

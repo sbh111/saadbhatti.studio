@@ -127,7 +127,6 @@ CREATE TABLE "inquiries" (
 );
 
 CREATE INDEX "inquiries_createdAt_idx" ON "inquiries"("createdAt" DESC);
-CREATE INDEX "inquiries_ipHash_createdAt_idx" ON "inquiries"("ipHash", "createdAt");
 ```
 
 A later migration added email-outcome tracking:
@@ -149,6 +148,10 @@ second line of defence rather than the only one. `emailStatus` makes a failed no
 Because those two columns arrived by `ALTER TABLE`, their **physical position is last**, not where
 they appear in the ORM model — `\d inquiries` will not match `schema.prisma` field order.
 
+A third migration dropped `inquiries_ipHash_createdAt_idx` (see §7): it was built for the original
+count-based rate limiter, which counted recent inquiry rows for an IP, and outlived that limiter's
+replacement by `rate_windows` with nothing left to query it.
+
 ### `likes`
 
 ```sql
@@ -161,9 +164,12 @@ CREATE TABLE "likes" (
     CONSTRAINT "likes_pkey" PRIMARY KEY ("id")
 );
 
-CREATE INDEX "likes_artworkPublicId_idx" ON "likes"("artworkPublicId");
 CREATE UNIQUE INDEX "likes_artworkPublicId_ipHash_key" ON "likes"("artworkPublicId", "ipHash");
 ```
+
+A later migration dropped the separately-created `likes_artworkPublicId_idx` (see §7): it was
+redundant with the leading column of the unique index above, which Postgres can already use for the
+same lookups.
 
 **Notes.** The unique index is the whole dedup mechanism: a second like raises a uniqueness
 violation, which the route catches and converts into a normal success response. Idempotency is
@@ -260,9 +266,9 @@ Every query in the codebase, and the index that serves it.
 | `artwork_embeddings` | raw `DELETE … <> ALL` | prune | PK-ish scan | offline |
 | `settings` | `findUnique` / `upsert` | `key` | PK | hot (cached) / admin |
 
-Two observations fall out of this table. **`likes` is write-only on the hot path** — there is no
-public read, no like count endpoint; the heart is optimistic on the client. And **two indexes serve
-nothing**, covered in §7.
+One observation falls out of this table: **`likes` is write-only on the hot path** — there is no
+public read, no like count endpoint; the heart is optimistic on the client. Two indexes that used to
+serve nothing have since been dropped — see §7.
 
 ---
 
@@ -339,16 +345,14 @@ deletes. Roughly one row per (bucket, distinct IP, window) accumulates indefinit
 `rate_windows_windowStart_idx` index exists *specifically* to support a sweeper — which was never
 written. **Fix:** a periodic `DELETE FROM rate_windows WHERE "windowStart" < now() - interval '1 day'`.
 
-**`inquiries_ipHash_createdAt_idx` is dead weight.** It was created for the original rate limiter,
-which counted recent inquiry rows for an IP. That limiter was replaced by `rate_windows`, and **no
-query filters inquiries by `ipHash` any more** — the column is now write-only. The index costs
-write amplification on every insert and serves nothing. **Fix:** drop it, or keep it deliberately
-for ad-hoc forensic lookups and say so.
-
-**`likes_artworkPublicId_idx` is redundant.** Its column is the leading column of
-`likes_artworkPublicId_ipHash_key`, which Postgres can use for the same lookups. Two indexes are
-maintained where one would do; the ORM emitted both because the index and the unique constraint are
-declared separately. **Fix:** drop the single-column index.
+**`inquiries_ipHash_createdAt_idx` and `likes_artworkPublicId_idx` have been dropped.** Both served
+no query — the former was created for the original rate limiter, which counted recent inquiry rows
+for an IP; that limiter was replaced by `rate_windows`, and no query has filtered inquiries by
+`ipHash` since (the column is now write-only). The latter duplicated the leading column of
+`likes_artworkPublicId_ipHash_key`, which Postgres can already use for the same lookups — the ORM
+had emitted both only because the index and the unique constraint were declared separately. Migration
+`20260830120000_drop_unused_indexes` removes them; as with every migration, it must still be applied
+to Neon by hand (see the README's "Production migrations" section) since deploys never run one.
 
 **The `"__global__"` rows are write hotspots.** Every search and every inquiry email funnels
 through one row per window, so concurrent requests serialize on that row lock. This is the intended
@@ -382,7 +386,7 @@ build. Combined with a lazily-connected client singleton, this means a productio
 a reachable database — and a deploy can never half-apply a migration.
 
 **Migration history doubles as a project timeline:** `init_inquiries` → `add_settings_and_likes` →
-`add_rate_windows` → `add_inquiry_email_status` → `add_artwork_embeddings`.
+`add_rate_windows` → `add_inquiry_email_status` → `add_artwork_embeddings` → `drop_unused_indexes`.
 
 ---
 
@@ -390,7 +394,8 @@ a reachable database — and a deploy can never half-apply a migration.
 
 1. **Add the `rate_windows` sweeper.** It is the only unbounded growth in the system, on the
    hottest write path, and the supporting index already exists.
-2. **Drop the two indexes that serve no query.** Both are pure write cost.
-3. **Constrain `bucket`** — a `CHECK` or a lookup table would turn a silent typo into an error.
-4. **Revisit the vector index** only if the catalog grows by orders of magnitude. Today an exact
+2. **Constrain `bucket`** — a `CHECK` or a lookup table would turn a silent typo into an error.
+3. **Revisit the vector index** only if the catalog grows by orders of magnitude. Today an exact
    scan is both faster to reason about and more accurate.
+
+(The two indexes that served no query have since been dropped — see §7.)
