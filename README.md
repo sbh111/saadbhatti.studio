@@ -41,6 +41,18 @@ The build calls the Cloudinary Admin API. Copy `.env.local.example` to `.env.loc
 fill in the API key/secret from the Cloudinary dashboard (Settings → API Keys). Add the
 same two variables in Vercel: Project → Settings → Environment Variables.
 
+### Required env vars fail loud, not silent
+
+`CLOUDINARY_API_KEY`/`CLOUDINARY_API_SECRET`, `DATABASE_URL`, `IP_HASH_SALT`,
+`SESSION_SECRET`, and `ADMIN_USERNAME`/`ADMIN_PASSWORD_HASH` are asserted present (and
+non-empty) at server startup — see `lib/env.ts` and `instrumentation.ts`. A deploy
+missing any of them fails immediately at boot, naming every missing one, instead of the
+site building and rendering fine, then 500ing per-feature the first time each one is
+actually needed. A production Vercel build (`VERCEL_ENV=production`) additionally refuses
+to finish building at all if one is missing — see `next.config.ts`. Every other env var
+below (Resend, the event collector, `CATALOG_INDEX_TOKEN`) is an optional feature that
+already degrades gracefully on its own when unset.
+
 ### CI
 
 `.github/workflows/ci.yml` runs lint, typecheck, tests, and `next build` on every push

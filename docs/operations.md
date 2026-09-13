@@ -148,6 +148,14 @@ Every `process.env` read in the app (`app/`, `lib/`, `proxy.ts`), plus the env v
 Python services and `docker-compose.yml` read. "Lives in" is every place a value must be kept in
 sync — miss one after a rotation and that copy is now wrong.
 
+The seven starred as required below (`DATABASE_URL`, `CLOUDINARY_API_KEY`/`CLOUDINARY_API_SECRET`,
+`IP_HASH_SALT`, `SESSION_SECRET`, `ADMIN_USERNAME`/`ADMIN_PASSWORD_HASH`) are asserted at server
+startup — see `lib/env.ts` and `instrumentation.ts` — so a deploy missing any of them fails loudly,
+once, at boot, naming everything missing, rather than the old per-request discovery (tech debt
+1.3). `next.config.ts` additionally refuses to even finish a `VERCEL_ENV === "production"` build if
+one is missing. Every other var below is an optional feature that already degrades gracefully on
+its own when unset — see `lib/env.ts`'s own comment for why those are deliberately NOT asserted.
+
 | Variable | Lives in | Consumed by | If wrong or rotated |
 |---|---|---|---|
 | `DATABASE_URL` | Vercel; local `.env` | `lib/db.ts` (Prisma) — every runtime query | Every DB read/write fails: inquiries, likes, settings, rate limiting, search all break at once. |
@@ -155,7 +163,7 @@ sync — miss one after a rotation and that copy is now wrong.
 | `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | Vercel; local `.env.local` | `lib/cloudinaryAdmin.ts` — every catalog read, i.e. nearly the whole site (see tech-debt 1.4) | Every page that reads the catalog throws. |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | Vercel; local `.env.local` | `lib/auth.ts` — admin login | Owner locked out of `/admin/*`. |
 | `SESSION_SECRET` | Vercel; local `.env.local` | `lib/auth.ts` — signs/encrypts the admin session cookie | Rotating invalidates every existing session (logged out, sign back in); nothing else depends on it. |
-| `IP_HASH_SALT` | Vercel; local `.env.local` | `lib/inquiries.ts` `hashIp()` — every public write (inquiries, likes, search, events) | Unset: every public write 500s (tech-debt 1.3). Rotated: see below — treat as effectively permanent. |
+| `IP_HASH_SALT` | Vercel; local `.env.local` | `lib/inquiries.ts` `hashIp()` — every public write (inquiries, likes, search, events) | Unset: caught at boot (tech-debt 1.3 — see above); `hashIp()` itself still throws too, as a last line of defense. Rotated: see below — treat as effectively permanent. |
 | `RESEND_API_KEY` / `INQUIRY_NOTIFY_FROM` / `INQUIRY_NOTIFY_TO` | Vercel; local `.env.local` | `lib/mail.ts` — inquiry notification email | Best-effort: send is skipped/fails and logged; the inquiry itself still saves either way. |
 | `EVENT_COLLECTOR_URL` | Vercel; local `.env.local` | `lib/collector.ts` — where the site posts event batches | Forward silently fails (best-effort — endpoint still returns 204). |
 | `EVENT_INGEST_TOKEN` | Vercel (sender) + EC2 `deploy/.env` (checker, via `deploy/compose.prod.yml`) + local default in `docker-compose.yml` / `.env.local` | `lib/collector.ts` (send) / `collector/main.py` (check) | Mismatch: every event 401s at the collector and is silently dropped (best-effort). **Order matters** — see below. |

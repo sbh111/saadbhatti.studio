@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import fs from "node:fs";
 import path from "node:path";
+import { missingEnvVars } from "./lib/env";
 
 // Native ONNX runtime files the CLIP text encoder needs at runtime. Tracing picks
 // up the .node addon but not the shared libraries it dlopen()s, which is why the
@@ -43,6 +44,25 @@ for (const include of ORT_INCLUDES) {
         `exist: ${include}\nonnxruntime-node is at version ${ORT_VERSION} — its ` +
         `bundled file layout under bin/napi-v3/linux/x64 has apparently changed; ` +
         `update ORT_INCLUDES above to match.`
+    );
+  }
+}
+
+// Fail a PRODUCTION deploy before it goes live, rather than building fine and
+// failing at the first request (tech debt 1.3 — instrumentation.ts's
+// register() is the runtime line of defense; this is the build-time one, and
+// catches it even earlier). Gated on VERCEL_ENV — set by Vercel itself,
+// distinct from NODE_ENV — so a Preview deploy or a local `next build`
+// (VERCEL_ENV unset) is never blocked, only an actual Production-environment
+// build. This is nothing more than an env-var presence check (missingEnvVars,
+// shared with instrumentation.ts) — no Vercel API call — so it costs nothing
+// and does nothing on any other host if this ever runs somewhere else.
+if (process.env.VERCEL_ENV === "production") {
+  const missing = missingEnvVars(process.env);
+  if (missing.length > 0) {
+    throw new Error(
+      `next.config.ts: refusing to build for production — missing required ` +
+        `env var(s): ${missing.join(", ")}. See docs/operations.md's environment table.`
     );
   }
 }
