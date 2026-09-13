@@ -333,6 +333,21 @@ context would re-render every caption on every keystroke:
 Staged values live in **refs**, not state — mutating a ref doesn't re-render, so
 the counters above are what drive the UI, deliberately and narrowly.
 
+**Two open tabs (tech debt 1.6).** Every single-key change (`report`,
+`stageOrder`) is a **read-merge-write**: it re-reads the persisted map fresh,
+applies only that one key's change, writes the merged result back, and adopts
+it as the new in-memory snapshot — never a wholesale replace from a
+possibly-stale ref. A `storage` event listener (fires in every *other* tab on
+this origin when one writes localStorage, never the writing tab itself)
+re-hydrates `editsRef`/`orderRef` from the event's `newValue` and bumps
+`syncSignal`/`orderVersion` so mounted captions and lists re-seed. Together
+these mean two tabs staging edits to different artworks land **both** edits;
+before this, the second tab's mount-time snapshot silently overwrote the
+first's. Discard is the one deliberate exception: it always writes an empty
+map (not a merge), which is correct for its own "wipe everything" intent and
+propagates to other tabs via the same listener. The pure map-merge logic lives
+in `lib/adminStaging.ts` so it's unit-testable without a DOM.
+
 `isAdmin` is resolved client-side by one small fetch to `/api/admin/session`
 (re-run on route change), because the cookie is HttpOnly and unreadable from JS.
 This is the load-bearing trick that keeps the public site static: **reading the

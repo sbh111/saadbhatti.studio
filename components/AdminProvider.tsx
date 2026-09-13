@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import type { Fields } from "@/lib/artworkFields";
+import { applyStagingChange, parseStagingMap } from "@/lib/adminStaging";
 
 /**
  * Client-side admin state for CollectionView: inline metadata editing (1a) and
@@ -106,19 +107,31 @@ export function useIsAdmin(): boolean {
 
 function loadEdits(): Record<string, Fields> {
   if (typeof window === "undefined") return {};
-  try {
-    return JSON.parse(window.localStorage.getItem(LS_KEY) ?? "{}");
-  } catch {
-    return {};
-  }
+  return parseStagingMap<Fields>(window.localStorage.getItem(LS_KEY));
 }
 
 function loadOrders(): Record<string, string[]> {
   if (typeof window === "undefined") return {};
+  return parseStagingMap<string[]>(window.localStorage.getItem(LS_ORDER_KEY));
+}
+
+/** Unconditional write — used for a full-map replace (Discard, or a save's
+ * post-response prune), never for a single staged change. See `report` and
+ * `stageOrder` below for the read-merge-write path a single change goes
+ * through instead. */
+function writeEdits(map: Record<string, Fields>) {
   try {
-    return JSON.parse(window.localStorage.getItem(LS_ORDER_KEY) ?? "{}");
+    window.localStorage.setItem(LS_KEY, JSON.stringify(map));
   } catch {
-    return {};
+    /* storage full / unavailable — edits simply won't survive a refresh */
+  }
+}
+
+function writeOrders(map: Record<string, string[]>) {
+  try {
+    window.localStorage.setItem(LS_ORDER_KEY, JSON.stringify(map));
+  } catch {
+    /* storage full / unavailable — order simply won't survive a refresh */
   }
 }
 
@@ -168,33 +181,43 @@ export default function AdminProvider({
     setOrderVersion((v) => v + 1); // let mounted list/panel re-seed from storage
   }, [recomputeDirty]);
 
-  const persistEdits = useCallback(() => {
-    try {
-      window.localStorage.setItem(LS_KEY, JSON.stringify(editsRef.current));
-    } catch {
-      /* storage full / unavailable — edits simply won't survive a refresh */
+  // Cross-tab sync (tech debt 1.6): the `storage` event fires in every OTHER
+  // tab sharing this origin when one of them writes localStorage — never in
+  // the tab that made the write. Re-hydrating from `e.newValue` here (rather
+  // than re-reading via loadEdits/loadOrders) avoids a second synchronous
+  // localStorage read and matches exactly what the writing tab persisted.
+  // Without this, a second open tab held its mount-time snapshot forever and
+  // its own next write (a whole-map replace, pre-1.6) would erase whatever
+  // the first tab had staged since.
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === LS_KEY) {
+        editsRef.current = parseStagingMap<Fields>(e.newValue);
+        recomputeDirty();
+        setSyncSignal((s) => s + 1); // re-seed mounted captions from the merged map
+      } else if (e.key === LS_ORDER_KEY) {
+        orderRef.current = parseStagingMap<string[]>(e.newValue);
+        recomputeDirty();
+        setOrderVersion((v) => v + 1); // re-seed the reorder panel/list
+      }
     }
-  }, []);
-
-  const persistOrders = useCallback(() => {
-    try {
-      window.localStorage.setItem(
-        LS_ORDER_KEY,
-        JSON.stringify(orderRef.current)
-      );
-    } catch {
-      /* storage full / unavailable — order simply won't survive a refresh */
-    }
-  }, []);
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [recomputeDirty]);
 
   const report = useCallback(
     (publicId: string, fields: Fields | null) => {
-      if (fields) editsRef.current[publicId] = fields;
-      else delete editsRef.current[publicId];
-      persistEdits();
+      // Read-merge-write (tech debt 1.6): re-read the map fresh rather than
+      // trust editsRef, apply ONLY this key's change, then write the result
+      // back and adopt it as the new in-memory snapshot. This is what makes
+      // two tabs staging different artworks land BOTH edits instead of the
+      // second tab's whole-map write erasing the first tab's entry.
+      const merged = applyStagingChange(loadEdits(), publicId, fields);
+      editsRef.current = merged;
+      writeEdits(merged);
       recomputeDirty();
     },
-    [persistEdits, recomputeDirty]
+    [recomputeDirty]
   );
 
   const getStaged = useCallback(
@@ -204,13 +227,18 @@ export default function AdminProvider({
 
   const stageOrder = useCallback(
     (collectionPath: string, orderedPublicIds: string[] | null) => {
-      if (orderedPublicIds) orderRef.current[collectionPath] = orderedPublicIds;
-      else delete orderRef.current[collectionPath];
-      persistOrders();
+      // Same read-merge-write as `report` above, for the order map.
+      const merged = applyStagingChange(
+        loadOrders(),
+        collectionPath,
+        orderedPublicIds
+      );
+      orderRef.current = merged;
+      writeOrders(merged);
       recomputeDirty();
       setOrderVersion((v) => v + 1);
     },
-    [persistOrders, recomputeDirty]
+    [recomputeDirty]
   );
 
   const getStagedOrder = useCallback(
@@ -219,14 +247,18 @@ export default function AdminProvider({
   );
 
   const discardAll = useCallback(() => {
+    // Unlike report/stageOrder, this is a deliberate full wipe, not a
+    // single-key change — a plain write of `{}` (rather than a merge) is the
+    // correct behavior, and it propagates to any other open tab via the
+    // `storage` listener above, clearing their view too.
     editsRef.current = {};
     orderRef.current = {};
-    persistEdits();
-    persistOrders();
+    writeEdits({});
+    writeOrders({});
     setDirtyCount(0);
     setSyncSignal((s) => s + 1); // captions reset their inputs to the originals
     setOrderVersion((v) => v + 1); // list/panel reset to the saved order
-  }, [persistEdits, persistOrders]);
+  }, []);
 
   const saveAll = useCallback(async () => {
     const editEntries = Object.entries(editsRef.current);
@@ -257,12 +289,18 @@ export default function AdminProvider({
       };
 
       // Keep failed edits staged so the count reflects reality.
+      //
+      // NOTE: this still replaces the whole map from a pre-request snapshot
+      // rather than read-merge-writing (tech debt 1.5 — saveAll can wipe an
+      // edit staged, in THIS or another tab, while the request was in
+      // flight). 1.6 only fixes the single-key paths (report/stageOrder); the
+      // snapshot-vs-in-flight-edit race here is 1.5's fix.
       const remaining: Record<string, Fields> = {};
       for (const id of failedEdits ?? []) {
         if (editsRef.current[id]) remaining[id] = editsRef.current[id];
       }
       editsRef.current = remaining;
-      persistEdits();
+      writeEdits(remaining);
 
       // Reorders are NOT cleared here: successful ones self-clear via the
       // reorderable list's cleanup effect once router.refresh() delivers the new
@@ -290,7 +328,7 @@ export default function AdminProvider({
     } finally {
       setSaving(false);
     }
-  }, [persistEdits, recomputeDirty, router]);
+  }, [recomputeDirty, router]);
 
   const editValue = useMemo<EditContextValue>(
     () => ({ isAdmin, syncSignal, getStaged, report }),
