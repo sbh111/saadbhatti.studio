@@ -2,12 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // lib/rateLimit.ts imports `{ prisma } from "./db"`, which vitest resolves to
 // the same file as the "@/lib/db" alias — mocking one intercepts both.
+// $executeRaw defaults to a resolved promise (0 rows) so the opportunistic
+// sweep every isRateLimited call triggers (tech debt 2.1) is a harmless no-op
+// in the tests above that don't care about it — only the dedicated
+// sweepStaleRateWindows tests below override it.
 const upsert = vi.fn();
+const executeRaw = vi.fn().mockResolvedValue(0);
 vi.mock("@/lib/db", () => ({
-  prisma: { rateWindow: { upsert: (...args: unknown[]) => upsert(...args) } },
+  prisma: {
+    rateWindow: { upsert: (...args: unknown[]) => upsert(...args) },
+    $executeRaw: (...args: unknown[]) => executeRaw(...args),
+  },
 }));
 
-const { isRateLimited } = await import("@/lib/rateLimit");
+const { isRateLimited, sweepStaleRateWindows } = await import("@/lib/rateLimit");
 
 describe("isRateLimited", () => {
   beforeEach(() => {
@@ -130,5 +138,76 @@ describe("isRateLimited DB-failure logging (tech debt 2.6)", () => {
     expect(warn.mock.calls[1][0] as string).toContain(
       "2 more suppressed in the last minute"
     );
+  });
+});
+
+describe("sweepStaleRateWindows (tech debt 2.1)", () => {
+  // Fresh module instance per test, same reason as the logging describe block
+  // above: the warn throttle is module-level state, and these tests need to
+  // control exactly when it has (and hasn't) already logged.
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    executeRaw.mockReset().mockResolvedValue(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("does nothing on the un-sampled path (no query issued)", async () => {
+    const { sweepStaleRateWindows: fresh } = await import("@/lib/rateLimit");
+    fresh(() => 0.5); // 0.5 >= the 1% sample rate
+    expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("issues a bounded delete on the sampled path", async () => {
+    const { sweepStaleRateWindows: fresh } = await import("@/lib/rateLimit");
+    fresh(() => 0); // 0 < the 1% sample rate
+    expect(executeRaw).toHaveBeenCalledTimes(1);
+    // Third template-literal argument is the interpolated LIMIT value
+    // (…SELECT ctid … LIMIT ${SWEEP_BATCH_LIMIT}) — the loop guard against a
+    // huge backlog turning one sweep into a full-table delete.
+    expect(executeRaw.mock.calls[0][2]).toBe(5000);
+  });
+
+  it("cuts off at twice DAY_MS — the longest window in use, doubled as a margin", async () => {
+    vi.setSystemTime(new Date(10 * 24 * 60 * 60 * 1000)); // 10 days after epoch
+    const { sweepStaleRateWindows: fresh } = await import("@/lib/rateLimit");
+    fresh(() => 0);
+
+    // Second template-literal argument is the interpolated cutoff Date
+    // (…WHERE "windowStart" < ${cutoff} LIMIT …).
+    const cutoff = executeRaw.mock.calls[0][1] as Date;
+    expect(cutoff.getTime()).toBe(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  });
+
+  it("swallows a synchronous throw (e.g. a client that doesn't support $executeRaw)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    executeRaw.mockImplementationOnce(() => {
+      throw new Error("not a function");
+    });
+    const { sweepStaleRateWindows: fresh } = await import("@/lib/rateLimit");
+
+    expect(() => fresh(() => 0)).not.toThrow();
+    await Promise.resolve(); // flush any queued microtask
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0] as string).toContain(
+      "sweepStaleRateWindows: DB error (ignored): not a function"
+    );
+  });
+
+  it("swallows an async rejection from the query itself", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    executeRaw.mockRejectedValueOnce(new Error("connection refused"));
+    const { sweepStaleRateWindows: fresh } = await import("@/lib/rateLimit");
+
+    fresh(() => 0);
+    await Promise.resolve();
+    await Promise.resolve(); // rejection handling is one microtask further out
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0] as string).toContain("connection refused");
   });
 });

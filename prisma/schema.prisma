@@ -49,9 +49,13 @@ model Inquiry {
 
 // Per-IP rate-limit counters. A fixed-window scheme: one row per
 // (bucket, ipHash, windowStart), incremented atomically via upsert. Bounded
-// growth (one row per window, not per request) and the row-level increment
-// avoids a count-then-write race. `ipHash` may be a pseudo-key like "__global__"
-// for site-wide limits. Old windows are inert; sweep occasionally by windowStart.
+// growth per window (one row per window, not per request) and the row-level
+// increment avoids a count-then-write race. `ipHash` may be a pseudo-key like
+// "__global__" for site-wide limits. Old windows are inert and ARE swept —
+// opportunistically, by `sweepStaleRateWindows()` in lib/rateLimit.ts, which
+// piggybacks a small random sample of isRateLimited calls rather than a cron
+// (tech debt 2.1). `rate_windows_windowStart_idx` (below) is what makes that
+// sweep's own `WHERE "windowStart" < $1` selective instead of a sequential scan.
 model RateWindow {
   bucket      String   @db.VarChar(64) // "like" | "events" | "search" | "search_global" | "inquiry" | "inquiry_email"
   ipHash      String   @db.VarChar(64) // salted IP hash, or a global pseudo-key

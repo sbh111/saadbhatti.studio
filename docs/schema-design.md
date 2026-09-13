@@ -341,10 +341,16 @@ would run as a filter over the ANN-ordered scan and could under-fill the `LIMIT`
 
 Listed worst-first, each with its fix.
 
-**`rate_windows` grows forever.** The only statement against the table is the upsert; nothing ever
-deletes. Roughly one row per (bucket, distinct IP, window) accumulates indefinitely. The
-`rate_windows_windowStart_idx` index exists *specifically* to support a sweeper — which was never
-written. **Fix:** a periodic `DELETE FROM rate_windows WHERE "windowStart" < now() - interval '1 day'`.
+**`rate_windows` no longer grows forever.** The only statement against the table used to be the
+upsert — nothing ever deleted, so roughly one row per (bucket, distinct IP, window) accumulated
+indefinitely, and the `rate_windows_windowStart_idx` index existed *specifically* to support a
+sweeper that was never written (tech debt 2.1). `sweepStaleRateWindows()` in
+[lib/rateLimit.ts](../lib/rateLimit.ts) now does the sweep, opportunistically — no cron, on
+purpose (runtime-agnostic, no new infra): ~1% of `isRateLimited` calls fire a bounded,
+fire-and-forget `DELETE ... WHERE ctid IN (SELECT ctid ... WHERE "windowStart" < $1 LIMIT 5000)`
+for windows older than twice `DAY_MS` (the longest window any bucket uses). Errors are swallowed
+and logged through the same throttled warn the limiter's own DB-failure path uses — the sweep can
+never delay or fail the rate-limit decision it rides along with.
 
 **`inquiries_ipHash_createdAt_idx` and `likes_artworkPublicId_idx` have been dropped.** Both served
 no query — the former was created for the original rate limiter, which counted recent inquiry rows
@@ -367,8 +373,9 @@ this scale — noted so nobody later writes `WHERE "emailStatus" = 'FAILED'` exp
 **The admin likes aggregate is a full scan.** It groups the entire table with no `WHERE` and no
 limit. Trivial today; scales linearly with total likes.
 
-**`inquiries` has no retention policy.** Rows are deleted only one at a time by the admin, and the
-log shows only the most recent 200 with no pagination — older rows become invisible but resident.
+**`inquiries` has no retention policy.** Rows are deleted only one at a time by the admin — the
+comment log is paginated (tech-debt.md 2.7) so older rows stay reachable, but nothing ever
+prunes them, so the table grows without bound.
 
 ---
 
@@ -393,10 +400,8 @@ a reachable database — and a deploy can never half-apply a migration.
 
 ## 9. What I would change next
 
-1. **Add the `rate_windows` sweeper.** It is the only unbounded growth in the system, on the
-   hottest write path, and the supporting index already exists.
-2. **Constrain `bucket`** — a `CHECK` or a lookup table would turn a silent typo into an error.
-3. **Revisit the vector index** only if the catalog grows by orders of magnitude. Today an exact
+1. **Constrain `bucket`** — a `CHECK` or a lookup table would turn a silent typo into an error.
+2. **Revisit the vector index** only if the catalog grows by orders of magnitude. Today an exact
    scan is both faster to reason about and more accurate.
 
 (The two indexes that served no query have since been dropped — see §7.)
