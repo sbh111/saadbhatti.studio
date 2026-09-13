@@ -11,6 +11,29 @@ index), it appears here only because the logging, documentation, or guard-rail a
 actual gap. See [system-overview.md](system-overview.md) and [schema-design.md](schema-design.md)
 for the reasoning behind those choices.
 
+## Resolution status — 2026-09-13
+
+Every entry below was worked on the `tech-debt` branch, lowest severity first, one commit per fix.
+The inventory text is left as written (it records the state on 2026-09-04). Entries that still
+need something from the owner are marked ⚠️.
+
+| Item | Commit(s) | Notes |
+|---|---|---|
+| S5 unused image · exports · embedder restart · compose comment · stale comments · magic values | `9ce5136` `1a738fd` `ca7f3e7` `1e84864` `c473887` `2e520d9` | Remote merged branches were already gone; the local `security-audit` branch was deleted |
+| 4.10 reindex runbook + drift detection | `805a67b` | New [operations.md](operations.md); drift card on `/admin/settings`. A rename or folder move does **not** need a reindex (`public_id` is the key) |
+| 4.9 secrets rotation | `be482a7` | ⚠️ Prune the unused Neon boilerplate vars from your local `.env` by hand |
+| 4.8 compose defaults | `b063071` | Both default to local; `/reindex?dry_run=true` + target hosts echoed |
+| 4.7 engines / .nvmrc / packageManager | `72aada0` | ⚠️ `engines.node` = `24.x` overrides the Vercel project's Node setting |
+| 4.6 embedder pins | `35a0dee` | Exact pins + `requirements.lock`; vision-only CLIP (verified bit-identical embeddings) |
+| 4.5 docs drift | `a7a155a` | |
+| 4.4 stranded docs | `16926cc` | Merged first, ahead of severity order, since the S4 docs work built on them |
+| 4.3 backups | `cf187cd` | ⚠️ `scripts/backup-db.sh` has never been run — do a first dump + restore drill |
+| 4.2 monitoring | `89abb87` | `/api/health`; ⚠️ point an uptime checker at it; error tracking left as an owner decision |
+| 4.1 lint / tests / CI | `fd0c31b` `2c4aab1` `af59c94` | ⚠️ Add `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` as GitHub Actions secrets |
+| 3.8 → 3.1 | `3495cd1` `803df40` `3a13fa2` `a7d12d1` `ef296e5` `c6b74f1` `cf5fe00` `1aea787` | ⚠️ 3.7 adds a migration — apply it manually in production |
+| 2.7 → 2.1 | `01831df` `55e3ee3` `74c23d3` `f802113` `24a7f4d` `6c614bd` `cfba21f` | 2.3: pinned both sides; baking weights is infeasible under the 250 MB limit — the durable fix is a warm encoder container. Follow-up `385abd4` keeps the Docker model layer cacheable |
+| 1.10 → 1.1 | `63fb911` `e183176` `b0c0d36` `c2f22dd` `8148a49` `9b1ad32` `1a2f215` `2f60197` `7587eb5` `9492903` | 1.8: slugs drop the `NN-` prefix; old prefixed anchors still resolve client-side |
+
 ---
 
 ## S1 — Live defects and data loss
