@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { isAdmin } from "@/lib/auth";
 import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
-import { invalid, noContent, str } from "@/lib/http";
+import { invalid, noContent, str, unavailable } from "@/lib/http";
 import { clientIpOf, hashIp } from "@/lib/inquiries";
 import { isRateLimited, LIKE_MAX, LIKE_WINDOW_MS } from "@/lib/rateLimit";
 import { isEventStreamingEnabled } from "@/lib/settings";
@@ -72,7 +72,13 @@ export async function POST(request: NextRequest) {
     ) {
       return noContent();
     }
-    throw err;
+    // A real DB failure (pooler drop, timeout, …) — log it so it's visible
+    // somewhere (never the ipHash: it's PII-adjacent and useless for
+    // debugging anyway), and tell the client rather than letting an
+    // unhandled throw become a bare 500 the client doesn't check for
+    // (tech debt 1.7).
+    console.error("[likes] create failed:", err instanceof Error ? err.message : err);
+    return unavailable();
   }
 
   // A genuinely new like: the strongest signal. Best-effort stream, only when
@@ -124,6 +130,11 @@ export async function DELETE(request: NextRequest) {
   if (!ref) return invalid();
 
   // deleteMany → idempotent (unliking something not liked is a no-op, not a 404).
-  await prisma.like.deleteMany({ where: { artworkPublicId, ipHash } });
+  try {
+    await prisma.like.deleteMany({ where: { artworkPublicId, ipHash } });
+  } catch (err) {
+    console.error("[likes] delete failed:", err instanceof Error ? err.message : err);
+    return unavailable();
+  }
   return noContent();
 }

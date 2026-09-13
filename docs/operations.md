@@ -422,6 +422,7 @@ logs":
 | `producer queue still full after retry, dropping batch …` | [collector/main.py](../collector/main.py) | Kafka backpressure didn't clear even after one poll-and-retry — the collector returned 503 and the batch was dropped (still invisible to the visitor; `forwardEvents` above logs the 503 on the Next side). |
 | `flush timed out with N message(s) still queued` | [collector/main.py](../collector/main.py) | The broker didn't ack the batch within the flush deadline — the collector returned 503 instead of the silent-loss 204 this replaced. Frequent occurrences mean Kafka itself is degraded. |
 | `health: database check failed` | [app/api/health/route.ts](../app/api/health/route.ts) | What flips `/api/health` to `503` — the uptime checker above should already be catching this, this line is what confirms *why* in the logs. |
+| `[likes] create failed: …` / `[likes] delete failed: …` | [app/api/likes/route.ts](../app/api/likes/route.ts) | A non-dedup DB failure on a like/unlike write (tech debt 1.7) — the route now returns a 503 instead of an unhandled 500, and `LikeButton` rolls back the optimistic heart + `localStorage` entry. Never includes the ipHash. |
 
 None of these currently page anyone — they're what to `grep`/search for by hand, or what a log
 drain / alerting rule should watch for once one exists.

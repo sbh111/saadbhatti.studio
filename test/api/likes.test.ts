@@ -43,6 +43,7 @@ vi.mock("@/lib/collector", () => ({
 const { POST, DELETE } = await import("@/app/api/likes/route");
 const { NextRequest } = await import("next/server");
 const { ARTWORK_PUBLIC_ID_MAX } = await import("@/lib/eventTypes");
+const { clientIpOf, hashIp } = await import("@/lib/inquiries");
 
 function req(method: "POST" | "DELETE", body: unknown) {
   return new NextRequest("http://localhost/api/likes", {
@@ -128,5 +129,25 @@ describe.each([
     const { data, where } = dbCall().mock.calls[0][0];
     const artworkPublicId = (data ?? where).artworkPublicId;
     expect(artworkPublicId).toBe(knownArtwork);
+  });
+
+  // Tech debt 1.7: a non-P2002 db failure used to rethrow into an unhandled
+  // 500 the client never checked for. It must now be caught, logged (without
+  // the ipHash — see the assertion below), and surfaced as a terse 503.
+  it("db failure: 503 unavailable instead of an unhandled 500, and it's logged", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    dbCall().mockRejectedValue(new Error("connection terminated unexpectedly"));
+
+    const res = await handler()(req(method, { artworkPublicId: knownArtwork }));
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({ error: "unavailable" });
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const loggedArgs = consoleError.mock.calls[0];
+    expect(loggedArgs[0]).toMatch(/^\[likes\]/);
+    // The salted IP hash must never be logged (tech debt: invariant 6).
+    expect(loggedArgs.join(" ")).not.toContain(hashIp(clientIpOf(req(method, {}))));
+
+    consoleError.mockRestore();
   });
 });
