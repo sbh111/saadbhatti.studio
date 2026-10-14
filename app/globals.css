@@ -35,6 +35,18 @@
   }
 }
 
+:root {
+  /* Desktop sidebar width — kept in sync with SIDEBAR_WIDTH_PX in
+     lib/constants.ts (that copy exists because ArtworkImage's `sizes`
+     attribute can't resolve a CSS var; this one drives the Tailwind
+     arbitrary class on the sidebar itself). Change both together. */
+  --sidebar-width: 236px;
+
+  /* Target height ArtworkImage/ArtworkBlock/CollectionCover fit artwork to,
+     so captions align across the grid regardless of aspect ratio. */
+  --fit-height: 66vh;
+}
+
 html,
 body {
   height: 100%;

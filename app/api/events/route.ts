@@ -1,5 +1,6 @@
-import { NextResponse, after, type NextRequest } from "next/server";
+import { after, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/auth";
+import { boundedStr, noContent } from "@/lib/http";
 import { clientIpOf, hashIp } from "@/lib/inquiries";
 import { isRateLimited, EVENTS_MAX, EVENTS_WINDOW_MS } from "@/lib/rateLimit";
 import { isEventStreamingEnabled } from "@/lib/settings";
@@ -35,17 +36,8 @@ import {
  */
 export const dynamic = "force-dynamic";
 
-const noContent = () => new NextResponse(null, { status: 204 });
-
 const EVENT_TYPE_SET = new Set<string>(EVENT_TYPES);
 const GESTURE_SET = new Set<string>(INTENT_GESTURES);
-
-/** Trimmed string within [1, max], else undefined. */
-function boundedStr(v: unknown, max: number): string | undefined {
-  if (typeof v !== "string") return undefined;
-  const t = v.trim();
-  return t.length >= 1 && t.length <= max ? t : undefined;
-}
 
 /** Validate + normalize one raw client event, or drop it (null). */
 function sanitize(raw: unknown): ClientEvent | null {

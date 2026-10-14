@@ -10,7 +10,16 @@
 # ordinary development never starts any of them.
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector/pgvector:pg16, NOT plain postgres:16-alpine (tech debt 1.2):
+    # migration 5 runs `CREATE EXTENSION IF NOT EXISTS vector` for the CLIP
+    # search feature, and the vanilla Postgres image doesn't ship that
+    # extension at all — `npx prisma migrate dev` fails there with
+    # `extension "vector" is not available`. This image is itself just the
+    # official postgres:16 (Debian, not alpine) with pgvector built in, so the
+    # PGDATA default/env vars/healthcheck below are unchanged. See the
+    # README's "Local database" section if you have an EXISTING volume that
+    # predates this switch.
+    image: pgvector/pgvector:pg16
     container_name: sbh-studio-db
     restart: unless-stopped
     environment:
@@ -96,12 +105,22 @@ services:
   #   docker compose down
   # Pre-trained CLIP ViT-B/32 weights are baked into the image (same variant the
   # site's JS query encoder uses — model parity). Reads the artwork id list from
-  # the deployed site's admin catalog-index endpoint and writes vectors to Postgres.
+  # the deployed site's /api/catalog-index endpoint (bearer-token authed, not
+  # under /api/admin — a container has no browser session cookie to send) and
+  # writes vectors to Postgres.
+  #
+  # BOTH env vars below default LOCAL, deliberately — plain `docker compose
+  # --profile embedding up` must never touch production by accident. A real
+  # refresh (docs/operations.md §1) is an explicit opt-in: override BOTH
+  # CATALOG_INDEX_URL and EMBED_DATABASE_URL together. A local catalog against
+  # the production DB (or vice versa) is a legitimate thing to do on purpose —
+  # there's one Cloudinary cloud either way — so nothing here refuses a "mixed"
+  # combination; /reindex just logs and echoes back the two hosts it resolved
+  # so a mismatch is visible instead of silent (see embed/main.py).
   embed:
     build: ./embed
     container_name: sbh-studio-embed
     profiles: ["embedding"]
-    restart: unless-stopped
     # Host networking, deliberately: this is a local, on-demand tool that has to
     # reach BOTH a dev site on the host and the outside world. On a bridge network,
     # Docker 28+/29 blocks container→host traffic by default, so the gateway IP
@@ -112,15 +131,18 @@ services:
     network_mode: host
     environment:
       EMBED_TOKEN: ${EMBED_TOKEN:-sbh_local_embed} # local-only default; override in prod
-      # Artwork id source + its bearer. With host networking a local dev site is
-      # just http://localhost:3000/api/catalog-index.
-      # A remote default MUST use the CANONICAL host (www): the apex 308-redirects
-      # to www, and httpx drops the Authorization header across an origin change.
-      CATALOG_INDEX_URL: ${CATALOG_INDEX_URL:-https://www.saadbhatti.studio/api/catalog-index}
+      # Artwork id source + its bearer. Local default: with host networking, a
+      # local dev site is just http://localhost:3000/api/catalog-index. For a
+      # PRODUCTION refresh, override to the CANONICAL host (www): the apex
+      # 308-redirects to www, and httpx drops the Authorization header across
+      # an origin change. Same fact as SITE_ORIGIN in lib/constants.ts, which
+      # the Next app reads from — this file can't import it, so keep the host
+      # in sync by hand: https://www.saadbhatti.studio/api/catalog-index
+      CATALOG_INDEX_URL: ${CATALOG_INDEX_URL:-http://localhost:3000/api/catalog-index}
       CATALOG_INDEX_TOKEN: ${CATALOG_INDEX_TOKEN:-}
-      # Prefer the DIRECT (non-pooled) Neon URL for a real refresh; defaults to the
-      # local db container, reached via its published port (host networking means
-      # the compose service name `db` does not resolve here).
+      # Local default: the compose db container, via its published port (host
+      # networking means the compose service name `db` does not resolve here).
+      # For a PRODUCTION refresh, override to the DIRECT (non-pooled) Neon URL.
       EMBED_DATABASE_URL: ${EMBED_DATABASE_URL:-postgresql://sbh:sbh_local_dev@localhost:5432/sbh_studio}
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-sbh111}
 
