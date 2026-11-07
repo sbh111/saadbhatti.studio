@@ -1,12 +1,26 @@
-# CPU-only Torch (no CUDA) — keeps the image small; this runs on a laptop.
+# Direct dependencies only, exact-pinned — hand-edit this file when a direct
+# dependency changes, then regenerate embed/requirements.lock (see its header).
+# The Dockerfile installs from the LOCK file, not this one, for a reproducible
+# build; this file is what a human reads and edits.
+#
+# CPU-only Torch (no CUDA), enforced by version, not just by index. torch is
+# pinned to its own "+cpu" LOCAL version — a version string PyPI's default
+# index never publishes (PyPI's plain "2.13.0" is the CUDA build, pulling in
+# ~1.5 GB of nvidia-* wheels). Because pip requires an EXACT match on the local
+# version segment, "torch==2.13.0+cpu" can only ever be satisfied by the
+# PyTorch CPU wheel index below — so --extra-index-url (which ADDS an index
+# rather than replacing PyPI) stays safe here, unlike the old floor-pinned
+# ">=2.2" which let pip pick either build. (The other robust option — installing
+# torch by itself in its own Dockerfile RUN with --index-url — works too; this
+# repo keeps one requirements file/one `pip install` instead.)
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-fastapi>=0.115,<1.0
-uvicorn[standard]>=0.30
-torch>=2.2
-transformers>=4.44
-pillow>=10.3
-httpx>=0.27
-psycopg[binary]>=3.2
-pgvector>=0.3.6
-numpy>=1.26
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+torch==2.13.0+cpu
+transformers==5.15.1
+pillow==12.3.0
+httpx==0.28.1
+psycopg[binary]==3.3.4
+pgvector==0.5.0
+numpy==2.5.2

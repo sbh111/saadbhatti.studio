@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getArtworkIndex } from "@/lib/catalog";
+import { unauthorized } from "@/lib/http";
 
 /**
  * Machine endpoint: the list of artwork public_ids, for the offline CLIP embedder
@@ -17,7 +18,7 @@ export async function GET(request: NextRequest) {
   const token = process.env.CATALOG_INDEX_TOKEN;
   const auth = request.headers.get("authorization");
   if (!token || auth !== `Bearer ${token}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   const index = await getArtworkIndex();

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getSessionId } from "@/lib/sessionId";
+import { shouldRollbackLike } from "@/lib/likeButton";
 import { useIsAdmin } from "./AdminProvider";
 
 /**
@@ -37,6 +38,11 @@ export default function LikeButton({ publicId }: { publicId: string }) {
   const isAdmin = useIsAdmin();
   const [liked, setLiked] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Bumped on every click; lets a response tell whether it's still the most
+  // recent request for this button or has been superseded by a later click,
+  // so it knows whether rolling back would clobber newer state (tech debt
+  // 1.7 — see shouldRollbackLike).
+  const requestSeqRef = useRef(0);
 
   // Seed from localStorage after mount (SSR renders the unliked state, so the
   // static markup is identical for everyone — no hydration mismatch).
@@ -49,17 +55,21 @@ export default function LikeButton({ publicId }: { publicId: string }) {
   async function toggle() {
     if (busy) return;
     const next = !liked;
+    const previousLiked = liked;
+    const previousSet = loadLiked();
     setLiked(next); // optimistic
     setBusy(true);
 
-    // Persist intent locally first so a reload reflects it even if the POST fails.
-    const set = loadLiked();
-    if (next) set.add(publicId);
-    else set.delete(publicId);
-    saveLiked(set);
+    // Persist intent locally first so a reload reflects it even if the request fails.
+    const nextSet = new Set(previousSet);
+    if (next) nextSet.add(publicId);
+    else nextSet.delete(publicId);
+    saveLiked(nextSet);
 
+    const seq = ++requestSeqRef.current;
+    let ok = false;
     try {
-      await fetch("/api/likes", {
+      const res = await fetch("/api/likes", {
         method: next ? "POST" : "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -68,10 +78,19 @@ export default function LikeButton({ publicId }: { publicId: string }) {
         }),
         keepalive: true,
       });
+      ok = res.ok;
     } catch {
-      /* network failed — keep the optimistic state; localStorage already set */
+      ok = false; // network failure — same as a non-2xx response, below
     } finally {
       setBusy(false);
+    }
+
+    // Roll back BOTH the visual state and the localStorage entry to what
+    // they were before this click — but only if no later click has already
+    // moved the state on (a stale rollback would clobber it).
+    if (shouldRollbackLike(ok, seq, requestSeqRef.current)) {
+      setLiked(previousLiked);
+      saveLiked(previousSet);
     }
   }
 

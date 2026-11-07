@@ -16,10 +16,9 @@
  */
 
 import { Resend } from "resend";
+import { SITE_ORIGIN as SITE_URL } from "./constants";
 
-const SITE_URL = "https://saadbhatti.studio";
-
-export interface InquiryNotification {
+interface InquiryNotification {
   name: string;
   email: string;
   message: string;

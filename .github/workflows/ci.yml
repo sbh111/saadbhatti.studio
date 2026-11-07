@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+      # `next build` statically generates the public pages, which call the
+      # real Cloudinary Admin API for the catalog (see README "Cloudinary API
+      # credentials") — these must be real, read-only credentials from repo
+      # secrets. DATABASE_URL/DIRECT_URL only need to be well-formed: Prisma's
+      # generated client reads them at construction time, but nothing on any
+      # statically-built page ever issues a query, so an unreachable
+      # placeholder is deliberate here — never point this at a real database.
+      - run: npx next build
+        env:
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
+          DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci"

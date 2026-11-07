@@ -1,12 +1,13 @@
 import { blurUrl, imageSrcSet, imageUrl } from "@/lib/cloudinary";
+import { SIDEBAR_WIDTH_PX } from "@/lib/constants";
 
 /**
  * Responsive image with reserved aspect ratio to avoid layout shift.
  *
  * Scales to fit the screen: width is capped both by the container and by
- * whatever width puts the image's height at ~66vh — so the title + metadata
- * below it stay on screen even for tall portrait shots. Centered when
- * narrower than the container.
+ * whatever width puts the image's height at ~66vh (--fit-height in
+ * globals.css) — so the title + metadata below it stay on screen even for
+ * tall portrait shots. Centered when narrower than the container.
  *
  * `src` is either a local path under /public (starts with "/", e.g.
  * "/images/hero.jpg") served as-is, or a Cloudinary public id delivered
@@ -18,7 +19,10 @@ export default function ArtworkImage({
   aspect = 1.5,
   priority = false,
   fitViewport = true,
-  sizes = "(min-width: 900px) calc(100vw - 236px - 16px), calc(100vw - 16px)",
+  // The `sizes` attribute isn't part of the CSS cascade, so it can't resolve
+  // --sidebar-width — hence the plain TS constant instead of the CSS var
+  // every other consumer of the sidebar width uses.
+  sizes = `(min-width: 900px) calc(100vw - ${SIDEBAR_WIDTH_PX}px - 16px), calc(100vw - 16px)`,
 }: {
   src: string;
   alt: string;
@@ -33,7 +37,9 @@ export default function ArtworkImage({
       className="mx-auto max-w-full overflow-hidden rounded-[2px] bg-placeholder bg-cover bg-center"
       style={{
         aspectRatio: aspect,
-        width: fitViewport ? `min(100%, calc(${aspect} * 66vh))` : "100%",
+        width: fitViewport
+          ? `min(100%, calc(${aspect} * var(--fit-height)))`
+          : "100%",
         backgroundImage: isLocal ? undefined : `url(${blurUrl(src)})`,
       }}
     >

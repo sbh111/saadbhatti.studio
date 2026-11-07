@@ -41,6 +41,27 @@ The build calls the Cloudinary Admin API. Copy `.env.local.example` to `.env.loc
 fill in the API key/secret from the Cloudinary dashboard (Settings → API Keys). Add the
 same two variables in Vercel: Project → Settings → Environment Variables.
 
+### Required env vars fail loud, not silent
+
+`CLOUDINARY_API_KEY`/`CLOUDINARY_API_SECRET`, `DATABASE_URL`, `IP_HASH_SALT`,
+`SESSION_SECRET`, and `ADMIN_USERNAME`/`ADMIN_PASSWORD_HASH` are asserted present (and
+non-empty) at server startup — see `lib/env.ts` and `instrumentation.ts`. A deploy
+missing any of them fails immediately at boot, naming every missing one, instead of the
+site building and rendering fine, then 500ing per-feature the first time each one is
+actually needed. A production Vercel build (`VERCEL_ENV=production`) additionally refuses
+to finish building at all if one is missing — see `next.config.ts`. Every other env var
+below (Resend, the event collector, `CATALOG_INDEX_TOKEN`) is an optional feature that
+already degrades gracefully on its own when unset.
+
+### CI
+
+`.github/workflows/ci.yml` runs lint, typecheck, tests, and `next build` on every push
+and PR. The build step needs the same Cloudinary credentials as above — add
+`CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` as **repository secrets** (Settings →
+Secrets and variables → Actions) or the workflow's build step will fail. `DATABASE_URL`/
+`DIRECT_URL` are hardcoded to an unreachable placeholder in the workflow itself — nothing
+in the build ever queries the database, so no database secret is needed (or wanted) in CI.
+
 ### Hero & headshot — local files
 
 The landing hero and about-page headshot are served straight from the repo, not
@@ -53,25 +74,32 @@ Cloudinary. Drop the files at:
 reference starting with `/` is treated as a local file under `public/`, everything
 else as a Cloudinary public id.)
 
-### Images still to upload (placeholders until then)
-
-- `public/images/hero.jpg` and `public/images/headshot.jpg` (local, see above)
-- `photography/pakistan2023/photo-01` — first photo on Cloudinary (then set its real
-  `name`/`film` in the manifest)
-
 Images are delivered capped at **2048px long edge** (`c_limit`) with `f_auto,q_auto`,
 responsive `srcset`, lazy loading, and a blur-up placeholder. Originals stay off-site.
 
-## Local database (inquiries)
+## Local database (inquiries, likes, settings, rate limits, search vectors)
 
-Private inquiries ("comment log") are stored in Postgres via Prisma — Neon in production,
-a local Docker Postgres for development. **DB URLs live in `.env`** (not `.env.local`)
-because the Prisma CLI reads only `.env`; Next.js reads both. Copy `.env.example` to `.env`
-(the committed local Docker URLs work as-is) and add `IP_HASH_SALT` to `.env.local` (see
+Private inquiries ("comment log"), likes, the event-streaming toggle, rate-limit
+counters, and CLIP search vectors are all stored in Postgres via Prisma — Neon in
+production, a local Docker Postgres for development (see
+[docs/schema-design.md](docs/schema-design.md) for the five tables). **DB URLs
+live in `.env`** (not `.env.local`) because the Prisma CLI reads only `.env`;
+Next.js reads both. Copy `.env.example` to `.env` (the committed local Docker
+URLs work as-is) and add `IP_HASH_SALT` to `.env.local` (see
 `.env.local.example`).
 
+The local `db` image is `pgvector/pgvector:pg16`, not plain `postgres:16-alpine` —
+`prisma/migrations` includes `CREATE EXTENSION IF NOT EXISTS vector` (the CLIP search
+feature's storage), and a vanilla Postgres image doesn't ship that extension at all;
+`npx prisma migrate dev` used to fail on a fresh clone with `extension "vector" is not
+available` (tech-debt 1.2). If you have an **existing** local volume created before this
+switch, Postgres may log a collation-version mismatch warning when it starts under the
+new (Debian-based, not Alpine/musl) image — the clean fix is `docker compose down -v`
+(wipes the local volume; your data is disposable dev data, not anything to migrate) and
+recreating it fresh with `npx prisma migrate dev`.
+
 ```bash
-docker compose up -d              # start Postgres 16 (container sbh-studio-db, :5432)
+docker compose up -d              # start Postgres 16 + pgvector (container sbh-studio-db, :5432)
 npx prisma migrate dev            # first run: create tables from prisma/migrations
 npm run dev                       # http://localhost:3000
 
@@ -152,13 +180,33 @@ Turn the toggle off, or `docker compose stop collector kafka`, and the site (and
 likes) behave identically. Production deployment (EC2, TLS, security group) and
 the Python analysis consumer are Phases K2/K3 in the plan doc.
 
+## Semantic image search
+
+Visitors can search artwork by description (`/api/search`), backed by CLIP image vectors that
+a separate on-demand container (`embed/`, `docker compose --profile embedding`) writes to
+Postgres via its own `POST /reindex` endpoint. It does not run automatically — see
+[docs/operations.md §1](docs/operations.md#1-re-indexing-search) for when and how to re-run it,
+including the `EMBED_TOKEN` (defaulted in `docker-compose.yml`) and `CATALOG_INDEX_TOKEN`
+(`.env.local.example` has the local default; the production value lives in Vercel and is passed
+to the embedder per-invocation — see [docs/operations.md §2](docs/operations.md#2-secrets)).
+
 ## Deploy
 
 Hosted on Vercel (project linked to this repo; pushes to `main` deploy).
 Domain `saadbhatti.studio` is registered at Porkbun → point DNS at Vercel.
 Analytics: Vercel Analytics (already wired in `app/layout.tsx`).
 
-## Phase 1 (not built yet)
+## Admin panel
 
-Print purchasing, admin panel behind Vercel password protection, order log. The
-`content.json` schema already reserves `availability`/`price` on paintings for this.
+Logging in at `/admin/login` (single owner account, `iron-session` cookie —
+no Vercel password protection, no user table) unlocks inline editing on the
+public pages themselves: caption/metadata edits and drag-to-reorder are staged
+locally and published with one "Save all" (writes back to Cloudinary), plus
+three dedicated pages — `/admin/comments` (the inquiry log), `/admin/likes`
+(private like counts), and `/admin/settings` (the event-streaming toggle and
+search/embedding drift counts). See
+[docs/architecture.md §§8–9](docs/architecture.md) for how auth and the staged
+editor work.
+
+**Not built:** print purchasing and an order-log view. `content.json` already
+reserves `availability`/`price` on paintings for when that lands.

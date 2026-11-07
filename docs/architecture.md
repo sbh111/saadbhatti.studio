@@ -1,5 +1,10 @@
 # architecture.md — how saadbhatti.studio is put together
 
+> **⚠️ Partially stale.** This file is current as of Phase D and predates the likes,
+> settings, event-streaming, rate-limiting, and semantic-search work. For current
+> system state see [system-overview.md](system-overview.md); this remains useful as a
+> deeper structural reference for the parts it does cover.
+
 The structural reference for this codebase: what each directory is for, where data
 comes from, how requests flow, and which invariants must not be broken. Current as
 of **Phase D** (private inquiries / comment log).
@@ -30,8 +35,12 @@ Cloudinary folders            →   Site
 ─────────────────────────────────────────────────────
 /photography            (root folder)   →  a medium      → /photography
 /photography/SouthWest  (subfolder)     →  a collection  → /photography/southwest
-  01-colorado_iejdgb.jpg (asset)        →  an artwork    → …/southwest#01-colorado-iejdgb
+  01-colorado_iejdgb.jpg (asset)        →  an artwork    → …/southwest#colorado-iejdgb
 ```
+
+(The `01-` order prefix is stripped before the slug is derived — see "How the
+catalog is derived" below — so a link to `#colorado-iejdgb` keeps working even
+after the artwork is renumbered to `02-`, `03-`, etc.)
 
 Add a root folder in Cloudinary and a new medium appears in the sidebar. Nothing
 in the code is medium-specific — `photography` and `paintings` are not named
@@ -87,12 +96,18 @@ opaque reference and a display snapshot.
 | `content/` | Site text only — title, intro, bio, contact, hero/headshot refs. | Copy edits. **Not** artwork data; that's Cloudinary's job. |
 | `public/` | Static files served verbatim at the site root. | `images/hero.jpg`, `headshot.jpg`, `siteBorder.png` (the carpet frame). Referenced by a leading `/`. |
 | `docs/` | Planning + reference documents. Not shipped. | Specs, this doc, learnings, Q&A history. |
+| `collector/` | Python/FastAPI service (Kafka event ingest). Deployed separately, on the EC2 box — Vercel never builds it. | `main.py`, `Dockerfile`, `requirements.txt`. See [system-overview.md §9](system-overview.md#9-kafka-event-streaming--k1--k2--k3-). |
+| `embed/` | Python/FastAPI CLIP embedder — an on-demand container, not a standing service. Writes `artwork_embeddings`. | `main.py`, `Dockerfile`, `requirements.txt`. See [system-overview.md §8](system-overview.md#8-semantic-image-search-) and [operations.md §1](operations.md#1-re-indexing-search). |
 | `.claude/` | Agent tooling config (`launch.json` = dev-server definition for the preview tools). | Not application code. |
 
 Root files worth knowing: `proxy.ts` (the middleware — see §8), `docker-compose.yml`
-(local Postgres), `next.config.ts` (intentionally empty), `postcss.config.mjs`
-(Tailwind v4 entry point), `tsconfig.json` (defines the `@/*` → project-root alias
-used by every import).
+(local Postgres, plus the `streaming` and `embedding` profiles), `next.config.ts`
+(ships the ONNX native runtime the CLIP text encoder needs at build time, deriving
+the versioned `.so` name from `onnxruntime-node`'s own `package.json` and asserting
+at config load that every traced file exists — tech debt 2.4; see
+[system-overview.md §8](system-overview.md#8-semantic-image-search-)),
+`postcss.config.mjs` (Tailwind v4 entry point), `tsconfig.json` (defines the
+`@/*` → project-root alias used by every import).
 
 ---
 
@@ -103,7 +118,7 @@ Four stores, strictly separated. Knowing which owns what prevents most mistakes.
 | Store | Owns | Written by | Read by |
 |---|---|---|---|
 | **Cloudinary** (`sbh111`) | Mediums, collections, artworks, images, titles, metadata, order | Admin UI → `POST /api/admin/artworks`; Saad uploading directly | `lib/catalog.ts` at build/ISR |
-| **Postgres** (Neon prod / Docker local) | Inquiries only | `POST /api/inquiries`; comment-log Server Actions | `/admin/comments` |
+| **Postgres** (Neon prod / Docker local) | Inquiries, likes, settings, rate-limit windows, CLIP embeddings — five tables now, not one; see [schema-design.md](schema-design.md) | API routes; the CLIP embedder | `/admin/comments`, `/admin/likes`, `/admin/settings`, `/api/search` |
 | **`content/content.json`** | Site text (title, intro, bio, contact, hero/headshot refs) | Hand-edited, committed | `lib/content.ts` |
 | **`public/`** | Hero, headshot, border image | Committed files | Anything with a `/`-leading src |
 
@@ -119,14 +134,24 @@ survive an artwork being renamed, reordered, or deleted.
 | File | Role |
 |---|---|
 | `catalog.ts` | **The domain model.** Turns Cloudinary's folder tree into `CatalogMedium[] → CatalogCollection[] → CatalogArtwork[]`. Also exposes `getArtworkIndex()` (flat `public_id → artwork + location` map). |
-| `cloudinaryAdmin.ts` | Low-level authenticated Admin API client. Everything that reads or **mutates** Cloudinary. Holds the API key/secret. |
+| `artworkFields.ts` | Client-safe single source of truth for the title's and each metadata field's context read chain (`TITLE_KEYS`, `METADATA_FIELDS`, `FIELD_KEYS`). `catalog.ts`, the admin artworks route, `AdminProvider.tsx`, and `ArtworkCaption.tsx` all derive from it — adding a field is a one-line change here (tech-debt.md 3.1). |
+| `cloudinaryAdmin.ts` | Low-level authenticated Admin API client. Everything that reads or **mutates** Cloudinary. Holds the API key/secret. `fetchAllPages()` follows `next_cursor` for every paginated read `catalog.ts` and `reorderCollection` make, so a collection or folder list past one page no longer silently truncates (tech-debt.md 2.2). |
 | `cloudinary.ts` | Pure URL builders for image delivery (`imageUrl`, `imageSrcSet`, `blurUrl`) + `CLOUD_NAME`. No secrets — safe anywhere. |
 | `content.ts` | Types + loads `content.json`. |
 | `nav.ts` | Builds the sidebar tree from the catalog (`buildNavTree`) and the admin node (`buildAdminNavNode`). Pure, serializable. |
 | `auth.ts` | Session (iron-session), `isAdmin()`, `verifyCredentials()`. Holds bcrypt. |
 | `db.ts` | The `PrismaClient` singleton, cached on `globalThis` for dev HMR. Lazy — connects on first query. |
-| `inquiries.ts` | Server-only inquiry helpers: `hashIp`, `clientIpOf`, `isRateLimited`. Imports Prisma. |
+| `inquiries.ts` | Server-only IP helpers shared by every public write path: `hashIp`, `clientIpOf`. No Prisma import — routes call `rateLimit.ts`'s `isRateLimited` directly with their own bucket name and bounds. |
 | `inquiryLimits.ts` | Shared constants (lengths, email regex, rate limits) with **no server imports**, so the client form can share the server's numbers without pulling Prisma into the browser bundle. |
+| `rateLimit.ts` | The shared Postgres-backed rate limiter (`isRateLimited`) and every bucket's tuning constants (likes, events, search, search-global, the daily email cap). |
+| `http.ts` | Shared public-API response helpers (`invalid`, `rateLimited`, `busy`, `unavailable`, `unauthorized`, `noContent`) and string coercion (`str`, `boundedStr`), used by every route under `app/api/`. |
+| `settings.ts` | Server-only key/value settings (`getSetting`/`setSetting`), plus `isEventStreamingEnabled()` with a ~60s in-process cache on the ingest hot path. |
+| `mail.ts` | `sendInquiryNotification()` — the Resend call behind the best-effort inquiry email. Best-effort: warns and no-ops if unconfigured rather than throwing. |
+| `collector.ts` | Forwards enriched events to the Kafka collector over HTTP (best-effort, swallows every failure). |
+| `eventTypes.ts` | Client-safe event schema (`ClientEvent`, batch/flush constants) shared by the tracker and `/api/events` — same split rationale as `inquiryLimits.ts`. |
+| `sessionId.ts` | Client-side per-tab session id (sessionStorage) used to key events and likes. |
+| `clip.ts` | The CLIP **text** encoder (transformers.js/ONNX) used by `/api/search`; the image side lives in `embed/`. |
+| `constants.ts` | Single-source-of-truth magic values shared across files that must not drift (site origin, cache tag, revalidate window, layout numbers). |
 
 The `inquiries.ts` / `inquiryLimits.ts` split exists solely to enforce that last
 point. If you need a constant on both sides, it goes in `inquiryLimits.ts`.
@@ -142,7 +167,8 @@ point. If you need a constant on both sides, it goes in `inquiryLimits.ts`.
 | Membership | Assets whose `asset_folder` is `<medium>/<collection>`. |
 | Order | `localeCompare` on `display_name` — hence the `NN-` prefixes. |
 | Name | Context `Title Name` → `caption` → prettified filename (strips `NN-`, dashes → spaces). |
-| Metadata | Context keys `Film`, `Medium`, `Dimensions`, `Year` (`META_KEYS`), whichever exist, in that order. |
+| Slug (`#anchor`) | `slugify(display_name)` with the `NN-` prefix stripped FIRST (`lib/slug.ts`), so reordering never changes it. Empty after stripping → slug of `public_id`. Collisions within a collection are ranked by `public_id` and suffixed `-2`, `-3`, … — never by display order. |
+| Metadata | Context keys `Film`, `Medium`, `Dimensions`, `Year` (`METADATA_FIELDS` in `lib/artworkFields.ts`), whichever exist, in that order. |
 | Cover | First artwork. |
 | Aspect | Cloudinary `width/height` — reserves layout space to avoid shift. |
 
@@ -151,6 +177,16 @@ so `public_id` is an opaque, stable string (`01-muyThai_s2deee`), the folder is 
 `asset_folder` *attribute*, and the filename is `display_name`. Public ids are not
 paths and don't change when you rename or move an asset — which is exactly why
 they're used as the stable key everywhere.
+
+**Legacy anchors.** Slugs only became reorder-stable after tech debt 1.8; a link
+sent before that fix (an inquiry-notification email, a row in the admin comment
+log, a bookmarked search/like snapshot) can still carry the old `NN-`-prefixed
+form. `components/LegacyHashResolver.tsx`, mounted on
+`/[medium]/[collection]`, resolves this client-side: on mount and on
+`hashchange`, if the current hash matches no element on the page, it strips a
+leading `\d+-` and tries again, scrolling to and `replaceState`-ing onto the
+canonical hash if that resolves. The pure matching logic is
+`resolveLegacyHash` in `lib/slug.ts`.
 
 ---
 
@@ -164,9 +200,17 @@ they're used as the stable key everywhere.
 | `/[medium]/[collection]` | `app/[medium]/[collection]/page.tsx` | SSG via `generateStaticParams` | public |
 | `/admin/login` | `app/admin/login/page.tsx` | Dynamic | public (the way in) |
 | `/admin/comments` | `app/admin/comments/page.tsx` | `force-dynamic` | admin |
+| `/admin/likes` | `app/admin/likes/page.tsx` | `force-dynamic` | admin |
+| `/admin/settings` | `app/admin/settings/page.tsx` | `force-dynamic` | admin |
 | `POST /api/admin/artworks` | route handler | Dynamic | admin |
 | `GET /api/admin/session` | route handler | Dynamic | public (returns a bare boolean) |
 | `POST /api/inquiries` | route handler | Dynamic | public |
+| `POST` / `DELETE /api/likes` | route handler | `force-dynamic` | public (no-op if admin) |
+| `POST /api/events` | route handler | `force-dynamic` | public (no-op if admin; always 204) |
+| `GET /api/events/config` | route handler | `force-dynamic` | public (returns `{enabled}`) |
+| `GET /api/catalog-index` | route handler | `force-dynamic` | bearer token (`CATALOG_INDEX_TOKEN`) — a machine caller (the embedder), not a browser, so it's outside `/api/admin` on purpose |
+| `POST /api/search` | route handler | `force-dynamic`, Node runtime | public, rate-limited |
+| `GET /api/health` | route handler | `force-dynamic` | public — see [operations.md §3](operations.md#3-monitoring) |
 
 `app/layout.tsx` is the root: fonts, metadata, `revalidate = 3600`, and it builds
 the nav tree server-side, wrapping everything in `AdminProvider` → `AppShell`.
@@ -188,6 +232,7 @@ Server components (no `"use client"`) render on the server and ship no JS:
 | `ArtworkImage` | Responsive image, srcset + blur-up, capped so the caption stays on screen (`~66vh` height budget). Handles both local `/` paths and Cloudinary ids. |
 | `CollectionCover` | One collection on a medium page. |
 | `WIPView` | Placeholder for an empty medium. |
+| `InquiryEmailAlert` | Renders the failed/skipped-email banner + resend on a comment-log row. |
 
 Client components (`"use client"` — interactive):
 
@@ -202,6 +247,9 @@ Client components (`"use client"` — interactive):
 | `AdminBar` | Bottom bar: label, log out, dirty count, Save all / Discard all. | `useAdminBar` |
 | `InquiryForm` | Inline inquiry form; hidden for admins. | `useIsAdmin` |
 | `DeleteInquiryButton` | `window.confirm` guard on the delete form. | — |
+| `LikeButton` | The like/unlike heart; localStorage-only state, zero network on load, hidden for admins. | — |
+| `EventTracker` | Mounted once in `AppShell`; batches clickstream events and flushes via `sendBeacon`. Suppressed for admins, DNT, or the streaming toggle off. | `useIsAdmin` |
+| `SearchDrawer` | Full-height slide-in search UI over `/api/search`. | — |
 
 `ReorderableArtworkList` is the subtlest piece: it takes the *server-rendered*
 children and re-emits them in the staged order. React reconciles by key, so
@@ -234,6 +282,40 @@ Save all → POST /api/admin/artworks → write to Cloudinary
 
 Writes deliberately bypass the cache: `apiGetFresh()` (`cache: "no-store"`) is used
 before every mutation so a read-merge-write starts from live state.
+
+### Error boundaries and degraded rendering (tech debt 1.4)
+
+The root layout builds the nav tree from `getCatalog()` — until this fix, an
+unguarded call there meant a Cloudinary outage threw the **entire layout**,
+taking every route down with it (including the force-dynamic admin pages the
+owner would need to respond to the outage) with no error page at all, since
+the app had no `error.tsx`, `global-error.tsx`, or `not-found.tsx`. Now:
+
+- `app/layout.tsx` catches a `buildNavTree(await getCatalog())` failure and
+  renders an **empty nav tree** instead of throwing. See the trade-off this
+  implies for ISR pages, spelled out in a comment there: a background
+  regeneration that throws keeps serving the last good cached page, while one
+  that degrades (this catch) gets cached as the new "good" page — but that
+  only matters for a page whose own body needs nothing further from the
+  catalog. `app/[medium]/page.tsx` and `app/[medium]/[collection]/page.tsx`
+  both fetch the catalog again for their own content, so the SAME outage still
+  throws there and ISR still serves their last good render; only `app/page.tsx`
+  and `app/about/page.tsx` (neither needs the catalog at all) could serve a
+  nav-less page for up to one `revalidate` window — a strict improvement over
+  a total outage.
+- `app/error.tsx` is a route-level boundary (catches anywhere under it,
+  without the rest of the app going down) and `app/global-error.tsx` is the
+  one Next requires to render its own `<html>`/`<body>`, for an error thrown
+  by the root layout itself — deliberately dependency-free (inline styles,
+  no shared components) since it has to keep working when the rest just
+  failed. `app/not-found.tsx` replaces Next's bare default 404.
+- `app/admin/comments/page.tsx` and `app/admin/likes/page.tsx` no longer put
+  the catalog in the same `Promise.all` as their DB query — the catalog only
+  supplies a thumbnail + link there (the DB rows carry their own
+  title/public-id), so a catalog failure degrades to a placeholder box and a
+  "catalog unavailable" note instead of a 500. `app/admin/settings/page.tsx`
+  already did this (`embeddingDrift()`'s own try/catch); `app/admin/login`
+  never touches the catalog.
 
 ---
 
@@ -285,6 +367,21 @@ context would re-render every caption on every keystroke:
 Staged values live in **refs**, not state — mutating a ref doesn't re-render, so
 the counters above are what drive the UI, deliberately and narrowly.
 
+**Two open tabs (tech debt 1.6).** Every single-key change (`report`,
+`stageOrder`) is a **read-merge-write**: it re-reads the persisted map fresh,
+applies only that one key's change, writes the merged result back, and adopts
+it as the new in-memory snapshot — never a wholesale replace from a
+possibly-stale ref. A `storage` event listener (fires in every *other* tab on
+this origin when one writes localStorage, never the writing tab itself)
+re-hydrates `editsRef`/`orderRef` from the event's `newValue` and bumps
+`syncSignal`/`orderVersion` so mounted captions and lists re-seed. Together
+these mean two tabs staging edits to different artworks land **both** edits;
+before this, the second tab's mount-time snapshot silently overwrote the
+first's. Discard is the one deliberate exception: it always writes an empty
+map (not a merge), which is correct for its own "wipe everything" intent and
+propagates to other tabs via the same listener. The pure map-merge logic lives
+in `lib/adminStaging.ts` so it's unit-testable without a DOM.
+
 `isAdmin` is resolved client-side by one small fetch to `/api/admin/session`
 (re-run on route change), because the cookie is HttpOnly and unreadable from JS.
 This is the load-bearing trick that keeps the public site static: **reading the
@@ -298,6 +395,23 @@ the server confirms the new order (avoiding an order "flash"); reorders are
 idempotent, so retrying heals a partial apply. A reorder whose collection changed
 underneath is rejected as **stale** rather than merge-guessed — bulk renames are
 destructive.
+
+**In-flight edits don't get lost either (tech debt 1.5).** `saveAll` snapshots
+exactly what it's sending, then on response computes what's still staged by
+reading the map fresh (post-response, picking up anything staged in this or
+another tab meanwhile) and dropping an id only if it was sent, didn't fail,
+**and** its current value still matches exactly what was sent — see
+`pruneSaved` in `lib/adminStaging.ts`. An entry the admin kept editing while
+the request was in flight is a genuinely newer, never-sent change, so it stays
+staged even though its id came back as saved. The caption inputs are also
+`disabled` for the duration (`saving`, exposed through `EditContext` — it
+flips at most twice per save, so it doesn't add keystroke-level churn to a
+context every caption consumes), closing the window where a keystroke could
+race the request in the first place. Separately, each caption re-seeds its
+inputs not only on `syncSignal` but whenever its own `contextTitle`/
+`metaFields` props change — closing a race where `saveAll` bumps `syncSignal`
+and calls `router.refresh()` in the same tick, but the refresh (and the fresh
+props it delivers) arrives later.
 
 ---
 
@@ -318,16 +432,19 @@ endpoint, never the Upload API's `rename`, so `public_id` never changes.
 
 **2. Public inquiry** — `POST /api/inquiries`
 ```
-parse/trim → honeypot `website` filled? → 200 {ok:true}, no DB write
+parse/trim → rate limit: sha256(ip + IP_HASH_SALT), ≥5 in 10min → 429
+           → honeypot `website` filled? → 200 {ok:true}, no DB write
            → validate name/email/message lengths + email shape → 400 "invalid"
            → artworkPublicId must exist in getArtworkIndex() → 400
              (and its title is snapshotted from there — never from the client)
-           → rate limit: sha256(ip + IP_HASH_SALT), ≥5 in 10min → 429
            → insert → 201
 ```
 Every rejection is terse and identical in shape — enumerating *why* only helps
-bots. The honeypot mimics success exactly. Rate limiting is **DB-backed** because
-in-memory counters are per-instance on serverless, i.e. useless.
+bots. The honeypot mimics success exactly — but only once the request has
+cleared the rate limit, so a bot that keeps the field filled is still capped
+like any other submission (see tech-debt.md 3.8: it used to run before the
+limiter, an unlimited bypass). Rate limiting is **DB-backed** because in-memory
+counters are per-instance on serverless, i.e. useless.
 
 **3. Comment log mutations** — Server Actions in `app/admin/comments/actions.ts`
 (`toggleReadAction`, `deleteInquiryAction`): `isAdmin()` guard → single-row
@@ -337,8 +454,13 @@ Prisma write → `revalidatePath("/admin/comments")`.
 
 ## 11. Database
 
-One table. Schema in `prisma/schema.prisma`, history in `prisma/migrations/`
-(committed — the migration folder *is* the schema's audit trail).
+**Five tables now, not one** — `inquiries` (this section's original subject),
+plus `likes`, `settings`, `rate_windows`, and `artwork_embeddings` added by the
+likes/streaming, rate-limiting, and search work. Schema in `prisma/schema.prisma`,
+history in `prisma/migrations/` (committed — the migration folder *is* the
+schema's audit trail). **Full reference:** [schema-design.md](schema-design.md)
+— this section keeps only the original `inquiries` detail, which is still
+accurate.
 
 ```
 Inquiry → table "inquiries"
@@ -347,14 +469,17 @@ Inquiry → table "inquiries"
   artworkTitle     varchar(255)   -- server-resolved snapshot
   name/email/message
   status           NEW | READ
+  emailStatus      PENDING | SENT | SKIPPED | FAILED   -- notification outcome
+  emailError       varchar(500), nullable
   ipHash           varchar(64)    -- sha256(ip + IP_HASH_SALT); never a raw IP
   createdAt
   @@index([createdAt desc])       -- the log's ordering
-  @@index([ipHash, createdAt])    -- the rate-limit lookup
+  @@index([ipHash, createdAt])    -- dead: no query filters by ipHash any more
+                                   -- (see schema-design.md §7)
 ```
 
-Both indexes exist to serve one query each. No `updatedAt`, no soft delete —
-status plus hard delete is the entire lifecycle.
+No `updatedAt`, no soft delete — status plus hard delete is the entire
+lifecycle.
 
 **Pooled vs direct connections.** Prisma is configured with two URLs because they
 do different jobs:
@@ -381,6 +506,18 @@ connects lazily, which is what lets `next build` succeed with no database at all
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH` | — | ✓ | ✓ | `auth.ts` |
 | `SESSION_SECRET` | — | ✓ | ✓ | `auth.ts` |
 | `IP_HASH_SALT` | — | ✓ | ✓ | `inquiries.ts` |
+| `RESEND_API_KEY` / `INQUIRY_NOTIFY_FROM` / `INQUIRY_NOTIFY_TO` | — | ✓ | ✓ | `mail.ts` (best-effort — unset just skips the send) |
+| `EVENT_COLLECTOR_URL` / `EVENT_INGEST_TOKEN` | — | ✓ | ✓ (+ EC2 `deploy/.env`) | `collector.ts` (send) / `collector/main.py` (check) |
+| `CATALOG_INDEX_TOKEN` | — | ✓ | ✓ | `app/api/catalog-index/route.ts` + the embedder |
+| `EMBED_TOKEN` / `EMBED_DATABASE_URL` | — | — | embedder env only (`docker-compose.yml`) | `embed/main.py` |
+| `MODEL_ID` / `MODEL_REVISION` | — | — | embedder env only (`docker-compose.yml`) | `embed/model_pin.py` (imported by `embed/main.py`; the Dockerfile bakes the pin from this same file) |
+| `INGEST_DOMAIN` | — | — | EC2 `deploy/.env` only | `deploy/compose.prod.yml` (Caddy TLS) |
+| `KAFKA_BOOTSTRAP` / `KAFKA_TOPIC` | — | — | collector env, defaulted | `collector/main.py` |
+
+This table covers the Next app's own config surface. For the **complete** list
+— including every Python-service and compose-only variable, what breaks when
+each is wrong, and rotation order for the two tokens that live in two places —
+see [operations.md §2](operations.md#2-secrets).
 
 **Why two files:** the **Prisma CLI reads `.env` and never `.env.local`**, while
 Next reads both (`.env.local` wins per-variable). Database URLs therefore live in
@@ -418,6 +555,10 @@ Missing-credential errors are raised deliberately with instructions
 8. **Never delete Cloudinary assets** — that's the real, only copy of production
    artwork data.
 9. **`inquiryLimits.ts` stays import-free** of anything server-only.
+10. **Slugs must stay reorder-stable.** An artwork's `#anchor` is derived with
+    the `NN-` reorder prefix stripped (`lib/slug.ts`), so renumbering a
+    collection never changes it — every place that computes a slug from a
+    filename must go through `lib/slug.ts`'s helpers, not a local regex.
 
 ---
 
@@ -430,10 +571,12 @@ The Phase D substrate was built to be reused:
   (`artworkPublicId` + snapshots + status enum) via one migration, add a child to
   `buildAdminNavNode()` (NavTree needs no changes), and copy the
   `/admin/comments` page + Server Actions pattern.
-- **A new public write endpoint** — the honeypot → validate → catalog-check →
-  rate-limit → insert pipeline in `app/api/inquiries/route.ts` is the template.
-- **A new artwork metadata field** — add to `META_KEYS` in `catalog.ts` and
-  `FIELD_KEYS` in `AdminProvider.tsx`.
+- **A new public write endpoint** — the rate-limit → honeypot → validate →
+  catalog-check → insert pipeline in `app/api/inquiries/route.ts` is the
+  template (the limit comes first so nothing, honeypot included, bypasses it).
+- **A new artwork metadata field** — add one entry to `METADATA_FIELDS` in
+  `lib/artworkFields.ts`; the catalog read side, the admin form, and the
+  admin save payload all derive from it (tech-debt.md 3.1).
 
 ---
 
@@ -441,8 +584,11 @@ The Phase D substrate was built to be reused:
 
 - **No unread badge** on the admin nav: it would put a DB query on every session
   re-check. A `/api/admin/inquiries/count` endpoint is the intended fix.
-- **The comment log caps at 200 rows** with a footnote; pagination is deferred.
+- **The comment log is paginated** (offset-based, 50 rows/page — tech-debt.md 2.7); no filter or
+  search yet.
 - **Untitled artworks** display a filename-derived name (`muyThai s2deee`), which
   is what the comment log will show until a `Title Name` context value is set.
-- **Email notification on new inquiries is out of scope** — the log is pull-only.
-  A fire-and-forget send after insert is the natural place.
+- **Email notification on new inquiries has shipped** (Resend, best-effort,
+  fired after the row is committed) — this section originally called it out of
+  scope; see [system-overview.md §5](system-overview.md#5-inquiries-and-email-notifications-)
+  for how it works.

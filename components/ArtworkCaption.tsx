@@ -2,16 +2,13 @@
 
 import { useEffect, useState } from "react";
 import {
+  fieldsFromContext,
   FIELD_KEYS,
-  useArtworkEdit,
-  type Fields,
+  METADATA_FIELDS,
   type FieldKey,
-} from "./AdminProvider";
-
-// The metadata fields (everything except the title) — same labels the catalog
-// reads from Cloudinary context, kept here so this client file needn't import
-// the server-only catalog module.
-const META_LABELS = FIELD_KEYS.filter((k) => k !== "title") as FieldKey[];
+  type Fields,
+} from "@/lib/artworkFields";
+import { useArtworkEdit } from "./AdminProvider";
 
 /**
  * The name + metadata under an artwork on CollectionView. Logged out (or when
@@ -32,23 +29,36 @@ export default function ArtworkCaption({
   contextTitle: string;
   metaFields: Record<string, string>;
 }) {
-  const { isAdmin, syncSignal, getStaged, report } = useArtworkEdit();
+  const { isAdmin, syncSignal, saving, getStaged, report } = useArtworkEdit();
 
-  const original: Fields = {
-    title: contextTitle,
-    Film: metaFields.Film ?? "",
-    Medium: metaFields.Medium ?? "",
-    Dimensions: metaFields.Dimensions ?? "",
-    Year: metaFields.Year ?? "",
-  };
+  // Derived from lib/artworkFields.ts's METADATA_FIELDS — adding a field
+  // there means this can't silently miss it (tech debt 3.1).
+  const original: Fields = fieldsFromContext(contextTitle, metaFields);
 
   const [vals, setVals] = useState<Fields>(original);
 
-  // Re-seed from the staged store on hydration and after Discard (syncSignal).
+  // Re-seed from the staged store on hydration and after Discard (syncSignal),
+  // AND whenever contextTitle/metaFields themselves change — which is what
+  // closes the race this comment used to describe: AdminProvider's `saveAll`
+  // bumps `syncSignal` and calls `router.refresh()` in the same tick, but the
+  // refresh is async, so an effect keyed on `syncSignal` alone fired
+  // immediately against the PRE-refresh props and nothing re-triggered it once
+  // the refreshed props actually arrived (see docs/tech-debt.md 1.5). Fixed by
+  // recomputing "original" straight from contextTitle/metaFields INSIDE the
+  // effect (not the outer `original`, which is a fresh object every render and
+  // would reseed on every keystroke if listed directly) and depending on both:
+  // this component is server-rendered (ArtworkBlock), so contextTitle/
+  // metaFields are referentially stable across ArtworkCaption's OWN re-renders
+  // (typing) and change only when the server actually sends new ones (a real
+  // save, via router.refresh()) — exactly the trigger this effect needs.
+  // Still deliberately omits `getStaged` and `publicId`: getStaged is a stable
+  // useCallback (empty deps in AdminProvider) and publicId is fixed for this
+  // component's lifetime, so omitting them changes nothing but silences a
+  // false positive.
   useEffect(() => {
-    setVals(getStaged(publicId) ?? original);
+    setVals(getStaged(publicId) ?? fieldsFromContext(contextTitle, metaFields));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [syncSignal]);
+  }, [syncSignal, contextTitle, metaFields]);
 
   if (!isAdmin) {
     return (
@@ -70,7 +80,7 @@ export default function ArtworkCaption({
 
   const dirty = FIELD_KEYS.some((k) => vals[k] !== original[k]);
   const inputClasses =
-    "w-full rounded-[2px] border bg-page px-2 py-1 text-[15px] text-ink outline-none focus:border-steel";
+    "w-full rounded-[2px] border bg-page px-2 py-1 text-[15px] text-ink outline-none focus:border-steel disabled:opacity-50";
 
   return (
     <div className={`rounded-[2px] p-2 ${dirty ? "bg-nav-active/60" : ""}`}>
@@ -79,19 +89,23 @@ export default function ArtworkCaption({
         value={vals.title}
         placeholder={contextTitle ? undefined : name}
         onChange={(e) => update("title", e.target.value)}
+        disabled={saving}
         className={`${inputClasses} text-lg font-medium ${
           vals.title !== original.title ? "border-steel" : "border-hairline"
         }`}
       />
       <div className="mt-2 grid grid-cols-2 gap-2">
-        {META_LABELS.map((key) => (
-          <label key={key} className="block text-sm text-ink-muted">
-            {key}
+        {METADATA_FIELDS.map(({ label }) => (
+          <label key={label} className="block text-sm text-ink-muted">
+            {label}
             <input
-              value={vals[key]}
-              onChange={(e) => update(key, e.target.value)}
+              value={vals[label as FieldKey]}
+              onChange={(e) => update(label as FieldKey, e.target.value)}
+              disabled={saving}
               className={`mt-0.5 ${inputClasses} ${
-                vals[key] !== original[key] ? "border-steel" : "border-hairline"
+                vals[label as FieldKey] !== original[label as FieldKey]
+                  ? "border-steel"
+                  : "border-hairline"
               }`}
             />
           </label>

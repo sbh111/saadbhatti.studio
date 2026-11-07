@@ -1,9 +1,16 @@
 # kafkaEventsPlan.md — Event streaming to Kafka (learning phase, toggleable)
 
-> **Status:** Phase K1 implemented on the `kafka-events` branch (app-side capture,
-> the like button, the toggle, and the local Kafka + collector stack). K2 is AWS
-> deployment; K3 is the Python consumer — both still pending.
-> For how the existing system is put together, see [architecture.md](architecture.md).
+> **Status as of 2026-09-12:** this design doc predates the implementation and is
+> kept for the reasoning/rationale it records — for current status, see
+> [system-overview.md §9](system-overview.md#9-kafka-event-streaming--k1--k2--k3-).
+> **K1 ✅ merged to `main`** (the `kafka-events` branch this doc originally
+> described has long since merged and been deleted) — app-side capture, the like
+> button, the toggle, and the local Kafka + collector stack all ship today.
+> **K2 🟡 scaffolded, not deployed** — `deploy/` holds the prod compose file,
+> Caddy TLS config, and a runbook, but no EC2 box is actually running it. **K3 📋
+> planned** — the Python consumer is unstarted. For how the existing system is
+> put together, see [architecture.md](architecture.md) and
+> [system-overview.md](system-overview.md).
 
 ## Context
 

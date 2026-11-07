@@ -18,14 +18,23 @@ export const dynamic = "force-dynamic";
 export default async function LikesPage() {
   if (!(await isAdmin())) redirect("/admin/login");
 
-  const [grouped, index] = await Promise.all([
+  // Same reasoning as app/admin/comments/page.tsx: the catalog only supplies
+  // a thumbnail + link, so a Cloudinary outage must not take this page down
+  // too (tech debt 1.4) — `.catch` it separately from the DB query.
+  const [grouped, indexResult] = await Promise.all([
     prisma.like.groupBy({
       by: ["artworkPublicId"],
       _count: { artworkPublicId: true },
       orderBy: { _count: { artworkPublicId: "desc" } },
     }),
-    getArtworkIndex(),
+    getArtworkIndex().catch((err) => {
+      console.error("[admin/likes] catalog unavailable:", err);
+      return null;
+    }),
   ]);
+  const catalogUnavailable = indexResult === null;
+  const index: Awaited<ReturnType<typeof getArtworkIndex>> =
+    indexResult ?? new Map();
 
   const total = grouped.reduce((sum, g) => sum + g._count.artworkPublicId, 0);
 
@@ -39,6 +48,12 @@ export default async function LikesPage() {
               grouped.length
             } piece${grouped.length === 1 ? "" : "s"}`}
       </p>
+      {catalogUnavailable && (
+        <p className="mt-1 text-[13px] text-steel">
+          Catalog unavailable — showing public ids only, no thumbnails or
+          links.
+        </p>
+      )}
 
       <ul className="mt-6 flex flex-col gap-3">
         {grouped.map((g) => {
@@ -48,12 +63,18 @@ export default async function LikesPage() {
               key={g.artworkPublicId}
               className="flex items-center gap-3 rounded-[2px] border border-hairline bg-panel p-3"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={imageUrl(g.artworkPublicId, 200)}
-                alt=""
-                className="h-16 w-24 shrink-0 rounded-[1px] bg-placeholder object-cover"
-              />
+              {/* No catalog → no Cloudinary thumbnail — see the comments page
+                  for why a placeholder box replaces it instead of a broken img. */}
+              {catalogUnavailable ? (
+                <div className="h-16 w-24 shrink-0 rounded-[1px] bg-placeholder" />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imageUrl(g.artworkPublicId, 200)}
+                  alt=""
+                  className="h-16 w-24 shrink-0 rounded-[1px] bg-placeholder object-cover"
+                />
+              )}
               <div className="min-w-0 grow">
                 {ref ? (
                   <Link
@@ -65,7 +86,9 @@ export default async function LikesPage() {
                 ) : (
                   <span className="truncate text-[15px] font-medium text-ink">
                     {g.artworkPublicId}{" "}
-                    <span className="text-ink-faint">(no longer listed)</span>
+                    {!catalogUnavailable && (
+                      <span className="text-ink-faint">(no longer listed)</span>
+                    )}
                   </span>
                 )}
               </div>

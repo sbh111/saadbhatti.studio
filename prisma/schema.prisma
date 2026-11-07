@@ -44,17 +44,20 @@ model Inquiry {
   createdAt       DateTime      @default(now())
 
   @@index([createdAt(sort: Desc)])
-  @@index([ipHash, createdAt])
   @@map("inquiries")
 }
 
 // Per-IP rate-limit counters. A fixed-window scheme: one row per
 // (bucket, ipHash, windowStart), incremented atomically via upsert. Bounded
-// growth (one row per window, not per request) and the row-level increment
-// avoids a count-then-write race. `ipHash` may be a pseudo-key like "__global__"
-// for site-wide limits. Old windows are inert; sweep occasionally by windowStart.
+// growth per window (one row per window, not per request) and the row-level
+// increment avoids a count-then-write race. `ipHash` may be a pseudo-key like
+// "__global__" for site-wide limits. Old windows are inert and ARE swept —
+// opportunistically, by `sweepStaleRateWindows()` in lib/rateLimit.ts, which
+// piggybacks a small random sample of isRateLimited calls rather than a cron
+// (tech debt 2.1). `rate_windows_windowStart_idx` (below) is what makes that
+// sweep's own `WHERE "windowStart" < $1` selective instead of a sequential scan.
 model RateWindow {
-  bucket      String   @db.VarChar(64) // "like" | "inquiry" | "events"
+  bucket      String   @db.VarChar(64) // "like" | "events" | "search" | "search_global" | "inquiry" | "inquiry_email"
   ipHash      String   @db.VarChar(64) // salted IP hash, or a global pseudo-key
   windowStart DateTime
   count       Int      @default(0)
@@ -76,8 +79,9 @@ model Setting {
 
 // A "like" on an artwork — the one explicit interest signal. Durable and
 // independent of the (toggleable) Kafka stream. Deduped one-per-visitor by the
-// same salted IP hash as inquiries; the unique constraint doubles as the rate
-// limit. Referenced by Cloudinary public_id only (the stable-key invariant).
+// same salted IP hash as inquiries via the unique constraint below; throughput
+// is rate-limited separately, by the "like" bucket in RateWindow. Referenced by
+// Cloudinary public_id only (the stable-key invariant).
 model Like {
   id              String   @id @default(cuid())
   artworkPublicId String   @db.VarChar(255)
@@ -85,7 +89,6 @@ model Like {
   createdAt       DateTime @default(now())
 
   @@unique([artworkPublicId, ipHash])
-  @@index([artworkPublicId])
   @@map("likes")
 }
 

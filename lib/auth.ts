@@ -13,9 +13,9 @@ import bcrypt from "bcryptjs";
  * module there would pull bcryptjs into the edge bundle) — keep them in sync.
  */
 
-export const SESSION_COOKIE = "sbh_admin_session";
+const SESSION_COOKIE = "sbh_admin_session";
 
-export interface SessionData {
+interface SessionData {
   isAdmin?: boolean;
 }
 

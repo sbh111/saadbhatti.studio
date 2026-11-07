@@ -27,7 +27,7 @@ export default function ArtworkBlock({
       />
       <figcaption
         className="mx-auto mt-3 max-w-full"
-        style={{ width: `min(100%, calc(${artwork.aspect} * 66vh))` }}
+        style={{ width: `min(100%, calc(${artwork.aspect} * var(--fit-height)))` }}
       >
         <ArtworkCaption
           publicId={artwork.image}

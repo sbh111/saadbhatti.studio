@@ -5,7 +5,7 @@ import raw from "@/content/content.json";
  * names, metadata, order — comes from Cloudinary; see lib/catalog.ts.
  */
 
-export interface SiteContent {
+interface SiteContent {
   site: {
     title: string;
     intro: string;
