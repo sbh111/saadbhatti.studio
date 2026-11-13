@@ -6,6 +6,7 @@ import { getArtworkIndex } from "@/lib/catalog";
 import { imageUrl } from "@/lib/cloudinary";
 import { content } from "@/lib/content";
 import { prisma } from "@/lib/db";
+import { artworkHref } from "@/lib/urls";
 
 export const metadata: Metadata = {
   title: `likes - ${content.site.title}`,
@@ -78,7 +79,11 @@ export default async function LikesPage() {
               <div className="min-w-0 grow">
                 {ref ? (
                   <Link
-                    href={`/${ref.mediumSlug}/${ref.collectionSlug}#${ref.artwork.slug}`}
+                    href={artworkHref(
+                      ref.mediumSlug,
+                      ref.collectionSlug,
+                      ref.artwork.slug
+                    )}
                     className="truncate text-[15px] font-medium text-ink hover:text-steel"
                   >
                     {ref.artwork.name}

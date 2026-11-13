@@ -63,12 +63,13 @@ export default async function RootLayout({
   // serving the last good cached page — the visitor never sees an error. A
   // regeneration that instead returns a DEGRADED render (this catch) gets
   // cached as the new "good" page. For a page whose own body also needs the
-  // catalog (app/[medium]/page.tsx, app/[medium]/[collection]/page.tsx — both
-  // call getCatalog*() again, deeper in the tree), that page's OWN fetch
-  // still throws on the same outage, so ISR still serves its last good
-  // render; only a page that needs nothing else from the catalog (app/
-  // page.tsx, app/about/page.tsx — verified by reading both) could get stuck
-  // serving a nav-less version for up to one revalidate window. That's a
+  // catalog (app/art/page.tsx, app/art/[medium]/page.tsx,
+  // app/art/[medium]/[collection]/page.tsx — all call getCatalog*() again,
+  // deeper in the tree), that page's OWN fetch still throws on the same
+  // outage, so ISR still serves its last good render; only a page that needs
+  // nothing else from the catalog (app/page.tsx, app/about/page.tsx —
+  // verified by reading both) could get stuck serving a nav-less version for
+  // up to one revalidate window. That's a
   // strict improvement over today, where the same outage takes those pages
   // (and every force-dynamic admin page) down completely, with no retry.
   let tree: NavNode[] = [];

@@ -20,7 +20,10 @@ npm run dev     # http://localhost:3000
 Admin API (see `lib/catalog.ts`). No code or JSON changes needed to add work:
 
 1. **Upload the image to Cloudinary** into the folder convention
-   `/<medium>/<collection>/`, e.g. `photography/pakistan2023/01-rooftops`.
+   `art/<medium>/<collection>/`, e.g. `art/photography/pakistan2023/01-rooftops`.
+   The `art/` wrapper is the catalog root (`CATALOG_ROOT_FOLDER`); a folder
+   created beside it is invisible to the site. The page is then at
+   `/art/photography/pakistan2023`.
 2. **Set contextual metadata** on the image in the Media Library:
    - `Title Name` — the display name (falls back to the built-in Title, then a
      prettified filename)

@@ -68,6 +68,64 @@ if (process.env.VERCEL_ENV === "production") {
 }
 
 const nextConfig: NextConfig = {
+  /**
+   * Legacy URL compatibility, and the ONE place in this repo that names a
+   * medium.
+   *
+   * Until the Cloudinary restructure the mediums WERE the account's root
+   * folders, so they were served at `/<medium>/<collection>`. They now live
+   * under `art/` and are served at `/art/<medium>/<collection>`
+   * (lib/urls.ts). Links sent before the move — inquiry-notification emails,
+   * admin comment-log rows, like-event snapshots, anything shared or
+   * bookmarked — must keep working, hence `permanent` (308).
+   *
+   * This is a FROZEN historical list, deliberately hardcoded rather than
+   * derived from the catalog: it maps slugs that were once published to where
+   * they live now, so it must stay correct even after a folder is renamed in
+   * Cloudinary. `lib/` and `app/` still name no medium anywhere
+   * (docs/architecture.md §1).
+   *
+   * Redirects are applied before filesystem routing, so this list must stay
+   * ENUMERATED — a generic `/:medium/:collection` rule would hijack
+   * `/admin/comments` into `/art/admin/comments`. Each bare path is listed
+   * separately from its `:path*` form rather than relying on `:path*`
+   * matching zero segments.
+   *
+   * The `#fragment` survives: it is never sent to the server, so the browser
+   * re-applies it to the redirect target — which is what keeps
+   * `…/southwest#colorado-iejdgb` deep links landing on the right artwork,
+   * where components/LegacyHashResolver.tsx takes over as before.
+   */
+  async redirects() {
+    return [
+      {
+        source: "/photography",
+        destination: "/art/photography",
+        permanent: true,
+      },
+      {
+        source: "/photography/:path*",
+        destination: "/art/photography/:path*",
+        permanent: true,
+      },
+      // The painting medium never held an asset (it was a WIPView), so these
+      // are belt-and-braces for a bookmarked tab. Both spellings are covered
+      // because the Cloudinary folder is now plural.
+      { source: "/paintings", destination: "/art/paintings", permanent: true },
+      {
+        source: "/paintings/:path*",
+        destination: "/art/paintings/:path*",
+        permanent: true,
+      },
+      { source: "/painting", destination: "/art/paintings", permanent: true },
+      {
+        source: "/painting/:path*",
+        destination: "/art/paintings/:path*",
+        permanent: true,
+      },
+    ];
+  },
+
   // transformers.js pulls in onnxruntime-node (a native addon); keep it external so
   // Next bundles a require() rather than trying to trace/bundle the binary. Used by
   // the CLIP text encoder in lib/clip.ts (app/api/search).

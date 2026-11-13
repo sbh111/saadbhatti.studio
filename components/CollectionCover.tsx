@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { countLabel, type CatalogCollection } from "@/lib/catalog";
+import { collectionHref } from "@/lib/urls";
 import ArtworkImage from "./ArtworkImage";
 
 /**
@@ -17,7 +18,7 @@ export default function CollectionCover({
 }) {
   return (
     <Link
-      href={`/${mediumSlug}/${collection.slug}`}
+      href={collectionHref(mediumSlug, collection.slug)}
       className="block px-2 pb-10"
     >
       {collection.cover && (
