@@ -7,6 +7,7 @@ import { invalid, noContent, str, unavailable } from "@/lib/http";
 import { clientIpOf, hashIp } from "@/lib/inquiries";
 import { isRateLimited, LIKE_MAX, LIKE_WINDOW_MS } from "@/lib/rateLimit";
 import { isEventStreamingEnabled } from "@/lib/settings";
+import { artworkHref } from "@/lib/urls";
 import { forwardEvents, type EnrichedEvent } from "@/lib/collector";
 import {
   ARTWORK_PUBLIC_ID_MAX,
@@ -89,7 +90,7 @@ export async function POST(request: NextRequest) {
       type: "artwork_like",
       ts: new Date().toISOString(),
       sessionId,
-      path: `/${ref.mediumSlug}/${ref.collectionSlug}#${ref.artwork.slug}`,
+      path: artworkHref(ref.mediumSlug, ref.collectionSlug, ref.artwork.slug),
       referrer: null,
       artworkPublicId,
       ipHash,

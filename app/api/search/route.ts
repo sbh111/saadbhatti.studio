@@ -3,6 +3,7 @@ import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
 import { busy, invalid, rateLimited, readCappedText, unavailable } from "@/lib/http";
 import { clientIpOf, hashIp } from "@/lib/inquiries";
+import { artworkHref } from "@/lib/urls";
 import {
   isRateLimited,
   SEARCH_MAX,
@@ -140,7 +141,7 @@ export async function POST(request: NextRequest) {
       {
         image: publicId,
         name: ref.artwork.name,
-        href: `/${ref.mediumSlug}/${ref.collectionSlug}#${ref.artwork.slug}`,
+        href: artworkHref(ref.mediumSlug, ref.collectionSlug, ref.artwork.slug),
       },
     ];
   });

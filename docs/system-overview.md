@@ -23,7 +23,8 @@ behind them, without being a line-by-line reference.
 Two bets shaped everything else:
 
 **Bet 1 — the Cloudinary folder tree *is* the site structure.** There is no artwork database
-and no CMS. Root folders are mediums, subfolders are collections, images are artworks, and
+and no CMS. The `art/` folder is the catalog root — its subfolders are mediums, theirs are
+collections, images are artworks, and
 per-image contextual metadata carries the title and fields. Adding a collection means creating
 a folder. The cost is that every structural read is a third-party API call — which is why
 caching (§3) matters so much.

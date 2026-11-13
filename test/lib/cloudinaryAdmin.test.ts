@@ -64,7 +64,7 @@ describe("mergeContext", () => {
 });
 
 // The shared paging helper behind tech debt 2.2 — every call site that used
-// to trust a single max_results page (getCatalog's /folders, fetchMedium's
+// to trust a single max_results page (getCatalog's and fetchMedium's
 // /folders/:folder, fetchCollection's and reorderCollection's
 // /resources/by_asset_folder) now goes through this. Tested here against a
 // fake fetchPage rather than a real fetch mock: the helper doesn't know or

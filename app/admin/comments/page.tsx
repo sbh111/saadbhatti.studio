@@ -6,6 +6,7 @@ import { getArtworkIndex } from "@/lib/catalog";
 import { imageUrl } from "@/lib/cloudinary";
 import { content } from "@/lib/content";
 import { prisma } from "@/lib/db";
+import { artworkHref } from "@/lib/urls";
 import DeleteInquiryButton from "@/components/DeleteInquiryButton";
 import InquiryEmailAlert from "@/components/InquiryEmailAlert";
 import LocalTime from "@/components/LocalTime";
@@ -126,7 +127,11 @@ export default async function CommentLogPage({
                     )}
                     {ref ? (
                       <Link
-                        href={`/${ref.mediumSlug}/${ref.collectionSlug}#${ref.artwork.slug}`}
+                        href={artworkHref(
+                          ref.mediumSlug,
+                          ref.collectionSlug,
+                          ref.artwork.slug
+                        )}
                         className="truncate text-[15px] font-medium text-ink hover:text-steel"
                       >
                         {ref.artwork.name}

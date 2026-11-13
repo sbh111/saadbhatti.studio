@@ -17,6 +17,7 @@
 
 import { Resend } from "resend";
 import { SITE_ORIGIN as SITE_URL } from "./constants";
+import { artworkUrl as artworkUrlFor } from "./urls";
 
 interface InquiryNotification {
   name: string;
@@ -24,7 +25,7 @@ interface InquiryNotification {
   message: string;
   artworkTitle: string;
   artworkPublicId: string;
-  /** Slug for the on-page anchor: /{medium}/{collection}#{artworkSlug} */
+  /** Slug for the on-page anchor: /art/{medium}/{collection}#{artworkSlug} */
   artworkSlug: string;
   mediumSlug: string;
   collectionSlug: string;
@@ -49,7 +50,11 @@ export async function sendInquiryNotification(
     return false;
   }
 
-  const artworkUrl = `${SITE_URL}/${data.mediumSlug}/${data.collectionSlug}#${data.artworkSlug}`;
+  const artworkUrl = artworkUrlFor(
+    data.mediumSlug,
+    data.collectionSlug,
+    data.artworkSlug
+  );
   const logUrl = `${SITE_URL}/admin/comments`;
 
   const subject = `New inquiry: ${data.artworkTitle} — ${data.name}`;

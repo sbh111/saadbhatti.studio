@@ -37,3 +37,15 @@ export const CATALOG_CACHE_TAG = "catalog";
  * sync with this one by hand instead.
  */
 export const CATALOG_REVALIDATE_SECONDS = 3600;
+
+/**
+ * The Cloudinary folder whose SUBFOLDERS are the site's mediums — the catalog
+ * root (lib/catalog.ts's `getCatalog`). Everything artwork-related lives under
+ * it, so sibling root folders (e.g. "blog assets") are invisible to the
+ * catalog by construction rather than by a filter that has to be maintained.
+ *
+ * Deliberately NOT the same constant as `ART_BASE_PATH` in lib/urls.ts, which
+ * is the public URL prefix: renaming this folder in Cloudinary must not
+ * silently rewrite every public URL on the site.
+ */
+export const CATALOG_ROOT_FOLDER = "art";

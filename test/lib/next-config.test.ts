@@ -47,3 +47,35 @@ describe("next.config.ts ONNX tracing", () => {
     );
   });
 });
+
+/**
+ * The legacy redirect list is the only compatibility layer for every artwork
+ * URL shared before the catalog moved under /art — already-sent inquiry
+ * emails, admin comment-log rows, bookmarks. It costs nothing to keep and
+ * breaks silently (a 404 on someone else's old link), so it gets a test.
+ */
+describe("next.config.ts legacy redirects", () => {
+  it("permanently redirects the old top-level medium paths under /art", async () => {
+    const redirects = await nextConfig.redirects!();
+    const map = new Map(redirects.map((r) => [r.source, r]));
+
+    for (const [source, destination] of [
+      ["/photography", "/art/photography"],
+      ["/photography/:path*", "/art/photography/:path*"],
+      ["/paintings", "/art/paintings"],
+      ["/paintings/:path*", "/art/paintings/:path*"],
+    ] as const) {
+      expect(map.get(source)).toMatchObject({ destination, permanent: true });
+    }
+  });
+
+  it("never uses a bare parameter as the first segment", async () => {
+    // Redirects are applied BEFORE filesystem routing, so a generic
+    // `/:medium/:collection` rule would hijack real routes — /admin/comments
+    // would 308 to /art/admin/comments. The list has to stay enumerated.
+    const redirects = await nextConfig.redirects!();
+    for (const { source } of redirects) {
+      expect(source.startsWith("/:")).toBe(false);
+    }
+  });
+});

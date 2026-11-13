@@ -18,7 +18,7 @@ shipped. The accurate model today is **two regimes living in one Next.js app**:
 
 | | Public site | Admin + inquiries |
 |---|---|---|
-| Routes | `/`, `/about`, `/[medium]`, `/[medium]/[collection]` | `/admin/*`, `/api/inquiries` |
+| Routes | `/`, `/about`, `/art`, `/art/[medium]`, `/art/[medium]/[collection]` | `/admin/*`, `/api/inquiries` |
 | When code runs | Build time (and hourly regeneration) | Per request |
 | A visitor request | CDN cache hit — never touches our code | Runs our code, hits Cloudinary or Postgres |
 | Backend analogy | Materialized view over Cloudinary, refreshed on a TTL | An ordinary small service |
@@ -27,8 +27,8 @@ shipped. The accurate model today is **two regimes living in one Next.js app**:
         BUILD TIME (npm run build / ISR regeneration)
 ┌──────────────┐   ┌─────────────────┐   ┌───────────────────────────────┐
 │ Cloudinary   │──▶│ lib/catalog.ts  │──▶│ Static HTML per route         │
-│ Admin API    │   │ (extract +      │   │ /, /about, /photography,      │
-│ (folders,    │   │  transform)     │   │ /photography/southwest, …     │
+│ Admin API    │   │ (extract +      │   │ /, /about, /art,              │
+│ (folders,    │   │  transform)     │   │ /art/photography/southwest, …  │
 │  metadata)   │   └─────────────────┘   └───────────────────────────────┘
 └──────────────┘           ▲                          │
                            │                          ▼
@@ -96,14 +96,17 @@ A layered architecture you'll recognize immediately:
 | Base template | chrome around every page | `app/layout.tsx` + `components/AppShell.tsx` |
 
 The interesting one is still **`lib/catalog.ts`**. `getCatalog()` walks Cloudinary's
-folder tree — root folders become mediums, subfolders become collections, assets
-become artworks — and transforms each asset: `display_name` → sort key + URL slug;
+folder tree from the `art/` root — its subfolders become mediums, theirs become
+collections, assets become artworks — and transforms each asset: `display_name` → sort key + URL slug;
 context `Title Name`/`caption` → artwork name; context `Film`/`Medium`/`Dimensions`/
 `Year` → a pre-rendered `metaLine`; real `width`/`height` → aspect ratio for layout.
 
 Note what *isn't* there: no medium is named anywhere in the code. `content.json`
-used to carry a medium list; it doesn't anymore. Add a root folder in Cloudinary and
-a new medium appears. That genericity was a deliberate Phase 0.5 refactor.
+used to carry a medium list; it doesn't anymore. Add a subfolder under `art/` in
+Cloudinary and a new medium appears. That genericity was a deliberate Phase 0.5
+refactor — and it survived the later move of the whole tree under `art/`, which
+was one constant (`CATALOG_ROOT_FOLDER`) plus a frozen redirect list for the
+URLs that had already been shared.
 
 `getCatalog()` is wrapped in React's `cache()` — request-scoped memoization, so the
 layout and every page share one fetch per render instead of each re-querying (think:
@@ -214,7 +217,7 @@ contents. The layout — sidebar included — never remounts. That's the "persis
 sidebar, only the main area changes" behavior from the original plan, and it's why
 nav expansion state survives navigation for free.
 
-Artwork links (`/photography/southwest#02-colorado-yxbd6m`) are plain **anchor
+Artwork links (`/art/photography/southwest#02-colorado-yxbd6m`) are plain **anchor
 navigation**: the `#fragment` scrolls to the `ArtworkBlock` with the matching `id`.
 `scroll-margin-top` in `globals.css` keeps targets off the container edge.
 
@@ -348,8 +351,8 @@ matcher because it's public by design.
   Cloudinary ETL using the env vars) → atomic deploy to the CDN. A failed build never
   takes the site down; the previous deploy stays live.
 - **Domain:** `saadbhatti.studio` (Porkbun DNS → Vercel); apex 308-redirects to `www`.
-- **Content ops (the payoff):** upload to `photography/<Collection Name>/` in the
-  Media Library, set Title + Film, prefix filenames `01-`, `02-`… for order. Folder
+- **Content ops (the payoff):** upload to `art/photography/<Collection Name>/` in
+  the Media Library, set Title + Film, prefix filenames `01-`, `02-`… for order. Folder
   name = collection title; rename the folder and the site follows. Live within the
   1-hour ISR window, or immediately via an admin save. Zero code, zero JSON, zero
   deploys for day-to-day content.

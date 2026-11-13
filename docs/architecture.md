@@ -31,20 +31,28 @@ There is no CMS and no artwork table. The **Cloudinary folder tree literally is
 the site structure**, and the site is derived from it at build time:
 
 ```
-Cloudinary folders            →   Site
-─────────────────────────────────────────────────────
-/photography            (root folder)   →  a medium      → /photography
-/photography/SouthWest  (subfolder)     →  a collection  → /photography/southwest
-  01-colorado_iejdgb.jpg (asset)        →  an artwork    → …/southwest#colorado-iejdgb
+Cloudinary folders              →   Site
+───────────────────────────────────────────────────────────────
+/art                   (the catalog root)  →  /art  (lists the mediums)
+/art/photography       (subfolder)         →  a medium      → /art/photography
+/art/photography/SouthWest (subfolder)     →  a collection  → /art/photography/southwest
+  01-colorado_iejdgb.jpg   (asset)         →  an artwork    → …/southwest#colorado-iejdgb
 ```
+
+The catalog root is named exactly once, as `CATALOG_ROOT_FOLDER` in
+`lib/constants.ts`. Root folders beside it (`blog assets`) are not artwork and
+never enter the catalog — which is the whole reason the wrapper folder exists.
 
 (The `01-` order prefix is stripped before the slug is derived — see "How the
 catalog is derived" below — so a link to `#colorado-iejdgb` keeps working even
 after the artwork is renumbered to `02-`, `03-`, etc.)
 
-Add a root folder in Cloudinary and a new medium appears in the sidebar. Nothing
-in the code is medium-specific — `photography` and `paintings` are not named
-anywhere in `lib/` or `app/`. Consequences:
+Add a subfolder under `art/` in Cloudinary and a new medium appears in the
+sidebar. Nothing in the code is medium-specific — `photography` and `paintings`
+are not named anywhere in `lib/` or `app/`; the only place in the repo that
+names a medium is the frozen legacy-redirect list in `next.config.ts`, which
+maps pre-restructure URLs (`/photography/…`) onto today's (`/art/photography/…`).
+Consequences:
 
 - **Ordering** is alphabetical by filename, which is why files carry `01-`, `02-`
   prefixes and why "reorder" means *renaming files*, not updating a database.
@@ -117,7 +125,7 @@ Four stores, strictly separated. Knowing which owns what prevents most mistakes.
 
 | Store | Owns | Written by | Read by |
 |---|---|---|---|
-| **Cloudinary** (`sbh111`) | Mediums, collections, artworks, images, titles, metadata, order | Admin UI → `POST /api/admin/artworks`; Saad uploading directly | `lib/catalog.ts` at build/ISR |
+| **Cloudinary** (`sbh111`) | Mediums (`art/*`), collections, artworks, images, titles, metadata, order | Admin UI → `POST /api/admin/artworks`; Saad uploading directly | `lib/catalog.ts` at build/ISR |
 | **Postgres** (Neon prod / Docker local) | Inquiries, likes, settings, rate-limit windows, CLIP embeddings — five tables now, not one; see [schema-design.md](schema-design.md) | API routes; the CLIP embedder | `/admin/comments`, `/admin/likes`, `/admin/settings`, `/api/search` |
 | **`content/content.json`** | Site text (title, intro, bio, contact, hero/headshot refs) | Hand-edited, committed | `lib/content.ts` |
 | **`public/`** | Hero, headshot, border image | Committed files | Anything with a `/`-leading src |
@@ -162,9 +170,9 @@ point. If you need a constant on both sides, it goes in `inquiryLimits.ts`.
 
 | Concept | Derivation |
 |---|---|
-| Medium | Root folder. `displayName` = folder name verbatim; URL = slugified. |
+| Medium | Subfolder of the catalog root `art/` (`CATALOG_ROOT_FOLDER`). `displayName` = folder name verbatim; URL = `/art/` + slugified. |
 | Collection | Subfolder of a medium. Folder name **is** the title. Empty collections are dropped. |
-| Membership | Assets whose `asset_folder` is `<medium>/<collection>`. |
+| Membership | Assets whose `asset_folder` is `art/<medium>/<collection>`. |
 | Order | `localeCompare` on `display_name` — hence the `NN-` prefixes. |
 | Name | Context `Title Name` → `caption` → prettified filename (strips `NN-`, dashes → spaces). |
 | Slug (`#anchor`) | `slugify(display_name)` with the `NN-` prefix stripped FIRST (`lib/slug.ts`), so reordering never changes it. Empty after stripping → slug of `public_id`. Collisions within a collection are ranked by `public_id` and suffixed `-2`, `-3`, … — never by display order. |
@@ -182,7 +190,7 @@ they're used as the stable key everywhere.
 sent before that fix (an inquiry-notification email, a row in the admin comment
 log, a bookmarked search/like snapshot) can still carry the old `NN-`-prefixed
 form. `components/LegacyHashResolver.tsx`, mounted on
-`/[medium]/[collection]`, resolves this client-side: on mount and on
+`/art/[medium]/[collection]`, resolves this client-side: on mount and on
 `hashchange`, if the current hash matches no element on the page, it strips a
 leading `\d+-` and tries again, scrolling to and `replaceState`-ing onto the
 canonical hash if that resolves. The pure matching logic is
@@ -196,8 +204,9 @@ canonical hash if that resolves. The pure matching logic is
 |---|---|---|---|
 | `/` | `app/page.tsx` | Static, 1h revalidate | public |
 | `/about` | `app/about/page.tsx` | Static | public |
-| `/[medium]` | `app/[medium]/page.tsx` | SSG via `generateStaticParams` | public |
-| `/[medium]/[collection]` | `app/[medium]/[collection]/page.tsx` | SSG via `generateStaticParams` | public |
+| `/art` | `app/art/page.tsx` | Static, 1h revalidate | public |
+| `/art/[medium]` | `app/art/[medium]/page.tsx` | SSG via `generateStaticParams` | public |
+| `/art/[medium]/[collection]` | `app/art/[medium]/[collection]/page.tsx` | SSG via `generateStaticParams` | public |
 | `/admin/login` | `app/admin/login/page.tsx` | Dynamic | public (the way in) |
 | `/admin/comments` | `app/admin/comments/page.tsx` | `force-dynamic` | admin |
 | `/admin/likes` | `app/admin/likes/page.tsx` | `force-dynamic` | admin |
@@ -297,12 +306,12 @@ the app had no `error.tsx`, `global-error.tsx`, or `not-found.tsx`. Now:
   regeneration that throws keeps serving the last good cached page, while one
   that degrades (this catch) gets cached as the new "good" page — but that
   only matters for a page whose own body needs nothing further from the
-  catalog. `app/[medium]/page.tsx` and `app/[medium]/[collection]/page.tsx`
-  both fetch the catalog again for their own content, so the SAME outage still
-  throws there and ISR still serves their last good render; only `app/page.tsx`
-  and `app/about/page.tsx` (neither needs the catalog at all) could serve a
-  nav-less page for up to one `revalidate` window — a strict improvement over
-  a total outage.
+  catalog. `app/art/page.tsx`, `app/art/[medium]/page.tsx` and
+  `app/art/[medium]/[collection]/page.tsx` all fetch the catalog again for
+  their own content, so the SAME outage still throws there and ISR still serves
+  their last good render; only `app/page.tsx` and `app/about/page.tsx` (neither
+  needs the catalog at all) could serve a nav-less page for up to one
+  `revalidate` window — a strict improvement over a total outage.
 - `app/error.tsx` is a route-level boundary (catches anywhere under it,
   without the rest of the app going down) and `app/global-error.tsx` is the
   one Next requires to render its own `<html>`/`<body>`, for an error thrown
@@ -555,7 +564,13 @@ Missing-credential errors are raised deliberately with instructions
 8. **Never delete Cloudinary assets** — that's the real, only copy of production
    artwork data.
 9. **`inquiryLimits.ts` stays import-free** of anything server-only.
-10. **Slugs must stay reorder-stable.** An artwork's `#anchor` is derived with
+10. **Public artwork URLs are built in `lib/urls.ts`, nowhere else.** Six
+    files used to assemble `/{medium}/{collection}#{slug}` by hand; the `/art`
+    prefix now lives in one constant (`ART_BASE_PATH`), deliberately separate
+    from `CATALOG_ROOT_FOLDER` so renaming a Cloudinary folder can't rewrite
+    every public URL. Old URLs stay alive through `next.config.ts`'s frozen
+    redirect list, not through the catalog.
+11. **Slugs must stay reorder-stable.** An artwork's `#anchor` is derived with
     the `NN-` reorder prefix stripped (`lib/slug.ts`), so renumbering a
     collection never changes it — every place that computes a slug from a
     filename must go through `lib/slug.ts`'s helpers, not a local regex.
@@ -566,7 +581,8 @@ Missing-credential errors are raised deliberately with instructions
 
 The Phase D substrate was built to be reused:
 
-- **A new medium or collection** — create the folder in Cloudinary. No code.
+- **A new medium or collection** — create the folder in Cloudinary, under
+  `art/` (a new root folder would be invisible to the catalog). No code.
 - **A new admin log** (e.g. orders): add a model with the same shape
   (`artworkPublicId` + snapshots + status enum) via one migration, add a child to
   `buildAdminNavNode()` (NavTree needs no changes), and copy the

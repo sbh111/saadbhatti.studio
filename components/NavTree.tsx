@@ -3,17 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import type { NavNode } from "@/lib/nav";
+import { ancestorsOf, type NavNode } from "@/lib/nav";
 
 const INDENT = [14, 26, 38, 52];
-
-function ancestorsOf(pathname: string): string[] {
-  const ids = ["art"];
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts.length >= 1) ids.push(`/${parts[0]}`);
-  if (parts.length >= 2) ids.push(`/${parts[0]}/${parts[1]}`);
-  return ids;
-}
 
 /** All node ids beneath `id` (exclusive), so collapsing a branch closes its subtree. */
 function descendantIds(nodes: NavNode[], id: string): string[] {
