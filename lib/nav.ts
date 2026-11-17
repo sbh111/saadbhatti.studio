@@ -1,5 +1,11 @@
 import type { CatalogMedium } from "./catalog";
-import { artHref, artworkHref, collectionHref, mediumHref } from "./urls";
+import {
+  artHref,
+  artworkHref,
+  blogHref,
+  collectionHref,
+  mediumHref,
+} from "./urls";
 
 /**
  * Serializable nav-tree node, built on the server, rendered by NavTree.
@@ -67,6 +73,19 @@ export function buildNavTree(mediums: CatalogMedium[]): NavNode[] {
   }
   return [
     { id: "/about", label: "about me", href: "/about", depth: 0, children: [] },
+    // Flat, href-ful and CHILDLESS on purpose. Listing posts here would mean a
+    // Postgres read inside buildNavTree, which app/layout.tsx calls on EVERY
+    // route — that one change would make the entire public site dynamic and
+    // break docs/architecture.md invariant 2. The index is the only way into
+    // the blog from the nav, and /blog/[slug] simply has no nav ancestor
+    // beyond it (ancestorsOf resolves "/blog" from the pathname anyway).
+    {
+      id: blogHref(),
+      label: "blog",
+      href: blogHref(),
+      depth: 0,
+      children: [],
+    },
     art,
   ];
 }
@@ -101,6 +120,13 @@ export function buildAdminNavNode(): NavNode {
     label: "admin",
     depth: 0,
     children: [
+      {
+        id: "/admin/blog",
+        label: "blog",
+        href: "/admin/blog",
+        depth: 1,
+        children: [],
+      },
       {
         id: "/admin/comments",
         label: "comment log",

@@ -30,6 +30,18 @@ enum EmailStatus {
   FAILED
 }
 
+// A blog post's lifecycle. DRAFT is freely saveable and invisible publicly;
+// PUBLISHED is live; ARCHIVED 404s publicly but stays in the admin list.
+//
+// ARCHIVED exists from this first migration even though Phase 0 ships no
+// archive button: adding a value to a Postgres enum is a migration, and the
+// cost of declaring it now is one word.
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
 model Inquiry {
   id              String        @id @default(cuid())
   artworkPublicId String        @db.VarChar(255) // ONLY stable artwork key
@@ -103,4 +115,56 @@ model ArtworkEmbedding {
   updatedAt DateTime                   @updatedAt
 
   @@map("artwork_embeddings")
+}
+
+// A blog post — the FIRST content entity this database owns. Every other table
+// here holds side-channel data about artwork whose authoritative copy lives in
+// Cloudinary; a post's prose exists ONLY here, which is what makes
+// scripts/backup-db.sh load-bearing rather than optional (tech debt 4.3).
+//
+// No foreign keys on this table because it has no parent — unlike the artwork
+// tables, whose parent genuinely lives in another system (docs/schema-design.md
+// §1). When Phase 2 adds post_likes, those children DO get a real FK with
+// ON DELETE CASCADE: `posts` is a real row in this database, so the "parent
+// lives elsewhere" reasoning that produced the no-FK rule does not apply to
+// them.
+model Post {
+  id String @id @default(cuid())
+
+  /// PERMANENT public contract: this is the /blog/<slug> URL. Derived from the
+  /// title via slugify() (lib/slug.ts) and editable ONLY while the post is a
+  /// DRAFT — once published, changing it breaks every link ever shared, which
+  /// is the same lesson tech debt 1.8 recorded for artwork anchors. Uniqueness
+  /// is enforced here, not just by the admin create path.
+  slug String @unique @db.VarChar(160)
+
+  title String @db.VarChar(160)
+
+  /// The index-card blurb, and the meta description once Phase 5 lands.
+  /// Owner-authored, never auto-truncated from the body.
+  excerpt String @db.VarChar(300)
+
+  /// Named `body`, NOT `bodyMarkdown`: Phase 0 renders it as plain text with
+  /// `whitespace-pre-wrap`, so Phase 1 adding Markdown is a RENDERING change
+  /// rather than a migration. Long bodies are TOASTed out-of-line by Postgres
+  /// automatically, so `SELECT id, title, status` never pays for them.
+  body String @db.VarChar(60000)
+
+  status PostStatus @default(DRAFT)
+
+  /// Set on the FIRST transition to PUBLISHED and never rewritten, so
+  /// re-publishing an old post does not reorder the public index.
+  publishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Serves the one hot public query — the index's
+  /// `WHERE status = 'PUBLISHED' ORDER BY "publishedAt" DESC`. `status` leads
+  /// because it is always an equality predicate. The admin list
+  /// (`ORDER BY updatedAt DESC`, optionally filtered) is a deliberate full
+  /// scan: dozens of rows, the same call schema-design.md §4 makes for the
+  /// admin likes aggregate.
+  @@index([status, publishedAt(sort: Desc)])
+  @@map("posts")
 }

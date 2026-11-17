@@ -551,9 +551,40 @@ Missing-credential errors are raised deliberately with instructions
 
 1. **`public_id` is the stable key.** Never rename via the Upload API. Staged
    edits, delivery URLs, and inquiry rows all point at it.
-2. **Public routes must stay static.** No session reads, no DB calls, no
+2. **Public routes must stay static.** No session reads and no
    `cookies()`/`headers()` in the public render path. Check the `npm run build`
-   route table: public routes must stay `○`/`●`, admin `ƒ`.
+   route table: public routes must stay `○`/`●`, admin `ƒ` — and
+   `npm run verify:routes` (`scripts/assert-static-routes.mjs`) now asserts
+   exactly that from `.next/prerender-manifest.json`, in CI, instead of leaving
+   it to a manual read.
+
+   **A public route MAY read Postgres** — the blog does, and it is the first
+   one to — under three conditions:
+
+   a. The read is wrapped in `unstable_cache` with the `blog` tag and
+      `BLOG_REVALIDATE_SECONDS` (`lib/posts.ts`), so Postgres is hit once per
+      revalidation window rather than once per request.
+   b. **`next build` never issues the query.** A dynamic route achieves this
+      with a `generateStaticParams` that returns `[]` and queries nothing
+      (`app/blog/[slug]/page.tsx` — exporting it is what keeps the route `●`;
+      returning nothing is what keeps the database out of the build). A static
+      route achieves it by catching the failure and degrading
+      (`listPublishedPosts`).
+   c. Per-visitor data never enters the render. Phase 0 has none; when likes
+      and comment counts arrive they are fetched client-side from
+      `/api/blog/*`, the way `AdminProvider` fetches `/api/admin/session`.
+
+   The build must stay database-independent. `.github/workflows/ci.yml` points
+   `DATABASE_URL` at an unreachable placeholder specifically to keep this
+   honest — if that build ever fails on a database error, something has turned
+   an optional query into a required one, and a Vercel deploy would then be
+   coupled to Neon's availability *and* to the manually applied migration
+   having landed first.
+
+   Note the deliberate asymmetry inside `lib/posts.ts`: the index **degrades**
+   on a database failure, a single post **re-throws**. Catching in the latter
+   would make the page call `notFound()`, and Next would cache that 404 for a
+   post that really exists.
 3. **The proxy is not a security boundary.** Every protected page/handler calls
    `isAdmin()` itself.
 4. **`/api/inquiries` must stay outside `/api/admin/`.**
@@ -574,6 +605,10 @@ Missing-credential errors are raised deliberately with instructions
     the `NN-` reorder prefix stripped (`lib/slug.ts`), so renumbering a
     collection never changes it — every place that computes a slug from a
     filename must go through `lib/slug.ts`'s helpers, not a local regex.
+12. **A published post's slug never changes.** It is editable while the post is
+    a `DRAFT` and locked from the first publish onward (`savePostAction`
+    ignores a submitted slug on a published post). Same lesson as 11, applied
+    to a URL a reader may already have shared.
 
 ---
 

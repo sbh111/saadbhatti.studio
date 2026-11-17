@@ -1,6 +1,6 @@
 # Schema design — Postgres
 
-The database behind [saadbhatti.studio](https://saadbhatti.studio): five tables on Neon Postgres,
+The database behind [saadbhatti.studio](https://saadbhatti.studio): six tables on Neon Postgres,
 reached through Prisma. This document explains **why the schema looks the way it does** and serves
 as a **reference** for what is actually in it.
 
@@ -14,9 +14,19 @@ each feature, see [system-overview.md](system-overview.md).
 Five ideas account for most of the schema.
 
 **The parent entity lives in another system.** Artworks are Cloudinary assets. There is no
-`artworks` table to point at, so there are **no foreign keys anywhere in this database** — every
+`artworks` table to point at, so there are **no foreign keys among the artwork tables** — every
 artwork reference is a Cloudinary `public_id` stored as a plain string. Referential integrity is
 something the application reasons about, not something Postgres enforces.
+
+> **This reason is specific to artwork, and does not generalise.** `posts` (added 2026-11-16) is
+> a real parent row in this database, so when Phase 2 adds `post_likes` and `post_comments` those
+> children **will** carry a real foreign key with `ON DELETE CASCADE`. Carrying the no-FK rule
+> into the blog would be cargo-culting a constraint that no longer applies: without the FK,
+> deleting a post relies on application code, and a hand-written `DELETE FROM posts` in psql
+> would orphan rows silently. Phase 0 ships `posts` alone, so it has no FK simply because it has
+> no parent. Note that Prisma's default `relationMode = "foreignKeys"` makes `schema.prisma` the
+> source of truth — an FK written only into migration SQL registers as drift — so the relation
+> must be declared, even if queries stay explicit.
 
 **Snapshot instead of join.** Because there is nothing to join *to*, an inquiry stores the artwork
 title it was made about. The record survives a rename, a re-crop, or a deletion — and a
@@ -30,8 +40,11 @@ analytics batch. A dedicated counter table measures traffic directly.
 Where the system needs to recognise "the same visitor again", it stores a salted SHA-256 of the IP
 and never the address itself.
 
-**One table per concern.** No table references another. Each can be truncated, migrated, or
+**One table per concern.** No table references another today. Each can be truncated, migrated, or
 dropped without touching the rest — which is what makes the optional subsystems genuinely optional.
+The blog's child tables (Phase 2) barely dent this: `ON DELETE CASCADE` fires only on *parent*
+delete, so `post_likes` stays independently truncatable and droppable; only truncating or dropping
+`posts` itself will need `CASCADE`.
 
 ---
 
@@ -245,6 +258,52 @@ Reads are cached in-process for ~60 seconds because the flag sits on an ingest h
 trade-off is that a toggle propagates within the TTL rather than instantly across serverless
 instances.
 
+### `posts`
+
+```sql
+CREATE TYPE "PostStatus" AS ENUM ('DRAFT', 'PUBLISHED', 'ARCHIVED');
+
+CREATE TABLE "posts" (
+    "id" TEXT NOT NULL,
+    "slug" VARCHAR(160) NOT NULL,
+    "title" VARCHAR(160) NOT NULL,
+    "excerpt" VARCHAR(300) NOT NULL,
+    "body" VARCHAR(60000) NOT NULL,
+    "status" "PostStatus" NOT NULL DEFAULT 'DRAFT',
+    "publishedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "posts_pkey" PRIMARY KEY ("id")
+);
+
+CREATE UNIQUE INDEX "posts_slug_key" ON "posts"("slug");
+CREATE INDEX "posts_status_publishedAt_idx" ON "posts"("status", "publishedAt" DESC);
+```
+
+**Notes.** The first table here that owns content rather than recording something *about*
+Cloudinary-hosted artwork — see the backup consequence in §7.
+
+`slug` is the public URL and is unique in the database, not merely in the admin create path. It is
+editable while a post is a `DRAFT` and locked from the first publish onward, for the same reason
+artwork anchors are reorder-stable (§1's "snapshot instead of join" cousin: a URL a reader has
+already shared must keep resolving).
+
+`publishedAt` is nullable and set on the **first** transition to `PUBLISHED`, then never rewritten
+— so unpublishing and re-publishing an old post does not jump it to the top of the index. It is
+also the index's sort key, which is why the public read additionally filters
+`publishedAt IS NOT NULL`: a row published by hand in psql without a date is omitted rather than
+rendered undated.
+
+`body` is plain text in Phase 0 (rendered with `whitespace-pre-wrap`, so no markup is interpreted
+and there is nothing to sanitise); the column is named `body` rather than `bodyMarkdown` so adding
+Markdown later is a rendering change, not a migration. Postgres TOASTs a value this size
+out-of-line and compressed once the row exceeds ~2 kB, so the admin list's
+`SELECT id, title, status, "updatedAt"` never pays to read a body it does not display.
+
+`ARCHIVED` exists in the enum from the first migration even though Phase 0 ships no archive
+button, because adding a value to an existing Postgres enum is a migration of its own.
+
 ---
 
 ## 4. Access patterns → indexes
@@ -266,6 +325,17 @@ Every query in the codebase, and the index that serves it.
 | `artwork_embeddings` | raw `INSERT … ON CONFLICT` | `publicId` | PK | offline |
 | `artwork_embeddings` | raw `DELETE … <> ALL` | prune | PK-ish scan | offline |
 | `settings` | `findUnique` / `upsert` | `key` | PK | hot (cached) / admin |
+| `posts` | `findMany` (public index) | `status = PUBLISHED ORDER BY publishedAt DESC` | `posts_status_publishedAt_idx` | hot (cached 1h) |
+| `posts` | `findFirst` (one post) | `slug, status = PUBLISHED` | `posts_slug_key` | hot (cached 1h) |
+| `posts` | `findMany` (admin list) | optional `status`, `ORDER BY updatedAt DESC` | full scan — deliberate | admin |
+| `posts` | `groupBy` (filter counts) | none | full scan — deliberate | admin |
+| `posts` | `findUnique` / `update` / `delete` | `id` | PK | admin |
+| `posts` | `findMany` (slug collision) | `slug STARTS WITH base` | `posts_slug_key` prefix scan | admin |
+
+Note that both public `posts` reads are marked "cached 1h": they go through `unstable_cache` in
+`lib/posts.ts`, so the hot path reaches Postgres once per revalidation window rather than once per
+request, and an admin publish drops the entry immediately via `updateTag`. The two admin full scans
+are deliberate at this table's size, the same call made for the admin likes aggregate below.
 
 One observation falls out of this table: **`likes` is write-only on the hot path** — there is no
 public read, no like count endpoint; the heart is optimistic on the client. Two indexes that used to
@@ -376,6 +446,20 @@ limit. Trivial today; scales linearly with total likes.
 **`inquiries` has no retention policy.** Rows are deleted only one at a time by the admin — the
 comment log is paginated (tech-debt.md 2.7) so older rows stay reachable, but nothing ever
 prunes them, so the table grows without bound.
+
+**`posts` is the first table whose loss would destroy content, so backups stopped being
+optional.** Every other table here is either derivable (`artwork_embeddings` — re-run the
+embedder; `rate_windows` — transient by design) or a record *about* an artwork whose real copy is
+safe in Cloudinary, which invariant 8 forbids deleting. A post's prose exists in exactly one
+place. `scripts/backup-db.sh` therefore moved from nice-to-have to load-bearing — and
+tech-debt.md 4.3 records that it **has never actually been run**, so a first dump-and-restore
+drill is owed before the blog carries anything worth keeping. Note the script needs the direct
+(non-pooled) URL: PgBouncer's transaction pooling cannot hold `pg_dump`'s long transaction.
+
+**The admin post list and its filter counts are full scans.** `listAllPosts` orders the whole
+table by `updatedAt` with no supporting index, and `countPostsByStatus` groups it. Deliberate at
+a personal blog's scale, and noted here so nobody reads the absence of an index as an oversight.
+The public reads are the ones that got an index, because they are the ones on a hot path.
 
 ---
 

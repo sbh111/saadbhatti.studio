@@ -51,10 +51,20 @@ function flatten(nodes: NavNode[]): NavNode[] {
 
 describe("buildNavTree", () => {
   const tree = buildNavTree(CATALOG);
-  const [about, art] = tree;
+  // Looked up by id, not by position: the top level has gained entries before
+  // (/art) and will again, and a positional destructure turns every such
+  // addition into five unrelated failures.
+  const byId = (id: string) => {
+    const node = tree.find((n) => n.id === id);
+    if (!node) throw new Error(`no top-level node ${id}`);
+    return node;
+  };
+  const about = byId("/about");
+  const art = byId("/art");
+  const blog = byId("/blog");
 
-  it("keeps 'about me' first and the art group second", () => {
-    expect(tree).toHaveLength(2);
+  it("has exactly the expected top-level entries, in order", () => {
+    expect(tree.map((n) => n.id)).toEqual(["/about", "/blog", "/art"]);
     expect(about).toMatchObject({ id: "/about", href: "/about", depth: 0 });
     expect(art).toMatchObject({ id: "/art", href: "/art", depth: 0 });
   });
@@ -103,13 +113,36 @@ describe("buildNavTree", () => {
     expect(paintings?.children).toEqual([]);
   });
 
+  it("keeps the blog entry flat and childless", () => {
+    // Load-bearing, not cosmetic: children here would mean a Postgres read
+    // inside buildNavTree, which app/layout.tsx runs on EVERY route — that
+    // would make the whole public site dynamic and break invariant 2.
+    expect(blog).toMatchObject({
+      id: "/blog",
+      href: "/blog",
+      depth: 0,
+      children: [],
+    });
+  });
+
   it("never emits a catalog href outside /art", () => {
-    const hrefs = flatten(tree)
+    // Scoped to the art subtree rather than the whole tree, so adding a
+    // sibling section (/blog, and whatever comes after it) can never launder a
+    // bare catalog href past this check — which is the point of the test.
+    const hrefs = flatten(art.children)
       .map((n) => n.href)
       .filter((href): href is string => Boolean(href));
+    expect(hrefs.length).toBeGreaterThan(0);
     for (const href of hrefs) {
-      expect(href === "/about" || href.startsWith("/art")).toBe(true);
+      expect(href.startsWith("/art")).toBe(true);
     }
+  });
+
+  it("emits no unexpected top-level hrefs", () => {
+    const topLevel = tree
+      .map((n) => n.href)
+      .filter((href): href is string => Boolean(href));
+    expect(topLevel).toEqual(["/about", "/blog", "/art"]);
   });
 });
 
@@ -128,6 +161,15 @@ describe("ancestorsOf", () => {
     const ids = ancestorsOf("/admin/comments");
     expect(ids).toContain(buildAdminNavNode().id);
     expect(ids).toContain("/admin/comments");
+  });
+
+  it("expands the blog index for a post path", () => {
+    // /blog/[slug] has no nav node of its own, so this is what keeps the
+    // "blog" row highlighted while reading a post.
+    expect(ancestorsOf("/blog/on-shooting-portra")).toEqual([
+      "/blog",
+      "/blog/on-shooting-portra",
+    ]);
   });
 
   it("handles the root and a flat page without throwing", () => {

@@ -80,7 +80,7 @@ else as a Cloudinary public id.)
 Images are delivered capped at **2048px long edge** (`c_limit`) with `f_auto,q_auto`,
 responsive `srcset`, lazy loading, and a blur-up placeholder. Originals stay off-site.
 
-## Local database (inquiries, likes, settings, rate limits, search vectors)
+## Local database (blog posts, inquiries, likes, settings, rate limits, search vectors)
 
 Private inquiries ("comment log"), likes, the event-streaming toggle, rate-limit
 counters, and CLIP search vectors are all stored in Postgres via Prisma — Neon in
@@ -193,6 +193,40 @@ including the `EMBED_TOKEN` (defaulted in `docker-compose.yml`) and `CATALOG_IND
 (`.env.local.example` has the local default; the production value lives in Vercel and is passed
 to the embedder per-invocation — see [docs/operations.md §2](docs/operations.md#2-secrets)).
 
+## Blog
+
+Posts live in Postgres (the first content this database owns — see the backup note below) and are
+written at `/admin/blog`:
+
+1. **`/admin/blog`** — every post, filterable by state (`?status=draft` and friends; the filter is
+   in the URL so a view is bookmarkable). Type a title and hit **new draft** to start one.
+2. **The editor** — title, slug, excerpt and body, with a **save** button and an unsaved-changes
+   warning if you try to leave with edits pending. Body is **plain text** for now: blank lines and
+   indentation are preserved and no markup is interpreted, so there is nothing to sanitise.
+   Markdown is the next phase.
+3. **Preview** a draft at `/admin/blog/<id>/preview` — it renders through the same component
+   visitors get, so the preview cannot drift from production. Drafts deliberately 404 on the
+   public URL; previewing there would mean reading the session on a public page and would make the
+   whole site dynamic.
+4. **publish** puts it live at `/blog/<slug>` and on the `/blog` index immediately (the cache is
+   invalidated on the spot, not on a timer). **unpublish** returns it to draft, **archive** takes
+   it off the site but keeps it in the admin list, **delete** is permanent.
+
+Two rules worth knowing:
+
+- **An excerpt is required to publish** (the index renders it), but not to save a draft.
+- **A published post's slug is locked.** It is editable only while the post is a draft, because
+  once published the URL is something a reader may already have shared.
+
+**The public blog pages read Postgres, which no other public page does.** That is deliberate and
+fenced in: reads are cached for an hour and tagged, `next build` never issues the query (so a
+deploy never depends on the database being up), and `npm run verify:routes` asserts the
+static/dynamic split in CI. See [docs/architecture.md §13](docs/architecture.md) invariant 2.
+
+**Back up the database.** Artwork survives a lost database because Cloudinary holds the real copy;
+blog posts do not. `scripts/backup-db.sh` has never been run — do a dump and a restore drill
+before you write anything you would mind losing.
+
 ## Deploy
 
 Hosted on Vercel (project linked to this repo; pushes to `main` deploy).
@@ -205,9 +239,10 @@ Logging in at `/admin/login` (single owner account, `iron-session` cookie —
 no Vercel password protection, no user table) unlocks inline editing on the
 public pages themselves: caption/metadata edits and drag-to-reorder are staged
 locally and published with one "Save all" (writes back to Cloudinary), plus
-three dedicated pages — `/admin/comments` (the inquiry log), `/admin/likes`
-(private like counts), and `/admin/settings` (the event-streaming toggle and
-search/embedding drift counts). See
+four dedicated pages — `/admin/blog` (write and publish posts, see below),
+`/admin/comments` (the inquiry log), `/admin/likes` (private like counts), and
+`/admin/settings` (the event-streaming toggle and search/embedding drift
+counts). See
 [docs/architecture.md §§8–9](docs/architecture.md) for how auth and the staged
 editor work.
 
