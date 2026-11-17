@@ -318,6 +318,13 @@ run — an untested backup is a hypothesis.
 
 ## Deploy
 
+> **If an install fails with `onnxruntime-node ... 404 Not Found`**, the CUDA
+> execution-provider download is the cause. `.npmrc` already skips it (nothing here
+> uses a GPU — the CLIP text encoder runs on CPU in a serverless function). If a
+> Vercel build somehow misses that file, set `ONNXRUNTIME_NODE_INSTALL_CUDA=skip`
+> as a project environment variable; it is the same switch in the form npm does not
+> deprecate.
+
 Hosted on Vercel (project linked to this repo; pushes to `main` deploy).
 Domain `saadbhatti.studio` is registered at Porkbun → point DNS at Vercel.
 Analytics: Vercel Analytics (already wired in `app/layout.tsx`).

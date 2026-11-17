@@ -15,7 +15,19 @@ jobs:
           node-version-file: ".nvmrc"
           cache: "npm"
 
+      # onnxruntime-node (transitive, via @huggingface/transformers) tries to
+      # download CUDA execution-provider binaries from a GitHub release asset
+      # that began 404ing on 2026-11-17, which fails `npm ci` outright. There
+      # is no GPU anywhere in this system — the CLIP text encoder runs on CPU
+      # in a serverless function — so the CUDA EP is pure download weight, and
+      # skipping it is onnxruntime's own documented remedy.
+      #
+      # .npmrc sets the same thing for fresh clones and for Vercel's install
+      # step. This is the env-var form, which npm does not warn about; keeping
+      # both means CI stays green if the .npmrc key is dropped by a future npm.
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
       - run: npm run lint
       - run: npm run typecheck
