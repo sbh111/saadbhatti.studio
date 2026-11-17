@@ -30,7 +30,9 @@ export default async function BlogIndex() {
       : `${posts.length} posts`;
 
   return (
-    <div className="pb-10">
+    // Centred to the same 680px measure as a post (components/PostArticle.tsx),
+    // so moving from the index into a post does not shift the column.
+    <div className="mx-auto max-w-[680px] pb-10">
       <header className="px-[30px] pb-5 pt-[34px]">
         <h1 className="font-pixel text-xl leading-relaxed text-ink">blog</h1>
         <p className="mt-1.5 text-[15px] text-ink-muted">{label}</p>

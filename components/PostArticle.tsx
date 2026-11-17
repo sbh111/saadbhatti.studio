@@ -47,15 +47,18 @@ export default function PostArticle({
     readingMinutes > 0 ? `${readingMinutes} min read` : "",
   ].filter(Boolean);
 
+  // One centred reading column. `mx-auto` sits on the <article> rather than on
+  // each child so the header, cover and body cannot drift out of alignment
+  // with one another; 680px is the measure the body was already set to.
   return (
-    <article className="pb-16">
+    <article className="mx-auto max-w-[680px] pb-16">
       <header className="px-[30px] pb-5 pt-[34px]">
         <h1 className="font-pixel text-xl leading-relaxed text-ink">{title}</h1>
         <p className="mt-1.5 text-[13px] text-ink-faint">{meta.join(" · ")}</p>
       </header>
 
       {cover && (
-        <div className="max-w-[680px] px-[30px] pb-6">
+        <div className="px-[30px] pb-6">
           {/* Reuses the catalog's image component, so a cover gets the same
               srcset, blur-up placeholder and reserved aspect ratio as artwork.
               `fitViewport` is off: a cover is part of the reading flow and
@@ -69,18 +72,18 @@ export default function PostArticle({
             }
             fitViewport={false}
             priority
-            sizes="(min-width: 900px) 680px, calc(100vw - 60px)"
+            sizes="(min-width: 900px) 620px, calc(100vw - 60px)"
           />
         </div>
       )}
 
       {html ? (
         <div
-          className="post-body max-w-[680px] px-[30px] text-[15px] leading-relaxed text-ink"
+          className="post-body px-[30px] text-[15px] leading-relaxed text-ink"
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : (
-        <div className="max-w-[680px] px-[30px] text-[15px] leading-relaxed">
+        <div className="px-[30px] text-[15px] leading-relaxed">
           <span className="text-ink-faint">This post has no body yet.</span>
         </div>
       )}

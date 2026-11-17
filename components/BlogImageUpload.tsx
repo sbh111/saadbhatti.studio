@@ -45,11 +45,14 @@ export default function BlogImageUpload({
   label,
   onUploaded,
   id,
+  postId,
 }: {
   label: string;
   onUploaded: (image: UploadedImage) => void;
   /** Distinct per instance — two file inputs on one page need separate ids. */
   id: string;
+  /** Scopes the signed ticket to this post's Cloudinary folder. */
+  postId: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +75,10 @@ export default function BlogImageUpload({
     try {
       const ticketResponse = await fetch("/api/admin/blog/upload-signature", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // The server signs `blog/<postId>` after validating the id and
+        // confirming the post exists — it is not taken on trust from here.
+        body: JSON.stringify({ postId }),
       });
       if (!ticketResponse.ok) {
         throw new Error(

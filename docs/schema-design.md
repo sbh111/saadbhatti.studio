@@ -316,7 +316,13 @@ column starts to earn its drift risk.
 Four nullable columns — `coverPublicId`, `coverAlt`, `coverWidth`, `coverHeight` — added as a
 metadata-only `ALTER` with no backfill: a post without a cover renders exactly as it did before.
 
-`coverPublicId` is a Cloudinary `public_id`, never a delivery URL. This is the same stable-key rule
+`coverPublicId` is a Cloudinary `public_id` of the form `blog/<slug>-<post id>/<asset>`, never a
+delivery URL. The folder is per post and carries both halves deliberately: the slug makes it
+legible when browsing Cloudinary, the id keeps it unique across posts that share a title and
+across a draft's slug changes (a slug is editable until first publish, invariant 12). The slug
+portion is capped at 60 characters so the full public_id fits this column even for a maximal
+160-character slug.
+ This is the same stable-key rule
 as `inquiries.artworkPublicId` and `likes.artworkPublicId`, and for a sharper reason here: a URL
 would bake today's transformation parameters (`f_auto,q_auto,c_limit,w_2048`) into the row, so
 changing the display cap later would mean rewriting data instead of editing `lib/cloudinary.ts`.

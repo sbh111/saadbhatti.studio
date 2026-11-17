@@ -274,6 +274,7 @@ export default function PostEditor({
               <BlogImageUpload
                 id="cover-replace"
                 label="replace"
+                postId={id}
                 onUploaded={onCoverUploaded}
               />
               <button
@@ -301,6 +302,7 @@ export default function PostEditor({
             <BlogImageUpload
               id="cover-add"
               label="upload a cover"
+              postId={id}
               onUploaded={onCoverUploaded}
             />
           </div>
@@ -319,6 +321,7 @@ export default function PostEditor({
           <BlogImageUpload
             id="body-image"
             label="insert an image"
+            postId={id}
             onUploaded={onBodyImageUploaded}
           />
         </div>

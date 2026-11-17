@@ -4,6 +4,7 @@ import {
   COVER_PUBLIC_ID_MAX,
   SLUG_MAX,
   isValidCoverPublicId,
+  isValidPostId,
   isValidSlug,
   parseCoverDimension,
 } from "@/lib/blogLimits";
@@ -47,10 +48,46 @@ describe("isValidSlug", () => {
   });
 });
 
+const POST_ID = "clq2x8k9p0000abcd1234efgh";
+
+describe("isValidPostId", () => {
+  it("accepts a Prisma cuid", () => {
+    expect(isValidPostId(POST_ID)).toBe(true);
+  });
+
+  it("accepts a uuid, so switching key format later is not a migration", () => {
+    expect(isValidPostId("0b5ed7e8-f0b6-4b1a-9a8e-2f1c3d4e5f60")).toBe(true);
+  });
+
+  it("rejects anything that could escape the folder it is interpolated into", () => {
+    // A post id becomes part of `blog/<id>`, which is then SIGNED. One
+    // containing `/` or `.` would sign an upload into a folder of the
+    // caller's choosing.
+    expect(isValidPostId("../art")).toBe(false);
+    expect(isValidPostId("a/b")).toBe(false);
+    expect(isValidPostId("a.b")).toBe(false);
+    expect(isValidPostId("a b")).toBe(false);
+    expect(isValidPostId("")).toBe(false);
+  });
+
+  it("rejects uppercase, so a folder name cannot differ only by case", () => {
+    expect(isValidPostId(POST_ID.toUpperCase())).toBe(false);
+  });
+
+  it("rejects implausibly short and long ids", () => {
+    expect(isValidPostId("abc")).toBe(false);
+    expect(isValidPostId("a".repeat(100))).toBe(false);
+  });
+});
+
 describe("isValidCoverPublicId", () => {
-  it("accepts a Cloudinary auto-generated id under blog/", () => {
-    expect(isValidCoverPublicId("blog/kq3n8xj2")).toBe(true);
-    expect(isValidCoverPublicId("blog/a_b-c123")).toBe(true);
+  it("accepts an asset inside the post's own folder", () => {
+    expect(isValidCoverPublicId(`blog/${POST_ID}/kq3n8xj2`)).toBe(true);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/a_b-c123`)).toBe(true);
+  });
+
+  it("rejects the old flat layout, so an unscoped asset cannot be attached", () => {
+    expect(isValidCoverPublicId("blog/kq3n8xj2")).toBe(false);
   });
 
   it("requires the blog/ prefix, so the catalog folder cannot be targeted", () => {
@@ -58,6 +95,7 @@ describe("isValidCoverPublicId", () => {
     expect(isValidCoverPublicId("kq3n8xj2")).toBe(false);
     expect(isValidCoverPublicId("blog")).toBe(false);
     expect(isValidCoverPublicId("blog/")).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/`)).toBe(false);
   });
 
   it("rejects anything that could change the meaning of a delivery URL", () => {
@@ -65,20 +103,21 @@ describe("isValidCoverPublicId", () => {
     // `,` and `:` are Cloudinary's own transformation separators, and `.`
     // is excluded outright so `..` is not expressible.
     expect(isValidCoverPublicId("blog/../art/secret")).toBe(false);
-    expect(isValidCoverPublicId("blog/a,w_9999")).toBe(false);
-    expect(isValidCoverPublicId("blog/a:b")).toBe(false);
-    expect(isValidCoverPublicId("blog/a/b")).toBe(false);
-    expect(isValidCoverPublicId("blog/a b")).toBe(false);
-    expect(isValidCoverPublicId("blog/a?x=1")).toBe(false);
-    expect(isValidCoverPublicId("blog/a#b")).toBe(false);
-    expect(isValidCoverPublicId("blog/a.jpg")).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/../../art/secret`)).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/a,w_9999`)).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/a:b`)).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/a/b`)).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/a b`)).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/a?x=1`)).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/a#b`)).toBe(false);
+    expect(isValidCoverPublicId(`blog/${POST_ID}/a.jpg`)).toBe(false);
   });
 
   it("rejects an empty value and one past the column width", () => {
     expect(isValidCoverPublicId("")).toBe(false);
-    expect(isValidCoverPublicId(`blog/${"a".repeat(COVER_PUBLIC_ID_MAX)}`)).toBe(
-      false
-    );
+    expect(
+      isValidCoverPublicId(`blog/${POST_ID}/${"a".repeat(COVER_PUBLIC_ID_MAX)}`)
+    ).toBe(false);
   });
 });
 

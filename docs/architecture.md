@@ -166,7 +166,7 @@ survive an artwork being renamed, reordered, or deleted.
 | `postDate.ts` | UTC-pinned date formatter for post bytes that get prerendered, so the HTML is identical across Vercel regions. |
 | `markdown.ts` | **Security code.** Markdown → hardened HTML for post bodies: raw HTML escaped to text, link/image schemes allowlisted, headings demoted. The only thing `dangerouslySetInnerHTML` is ever given (invariant 13). |
 | `readingTime.ts` | Word-count reading estimate. Pure and server-import-free, so the editor shows the same number the public pages do. |
-| `cloudinaryUpload.ts` | Signs browser-direct uploads (`signUploadParams`, `mintBlogUploadTicket`). Holds the API secret; scopes every ticket to `blog/` and to image formats, both inside the signature. |
+| `cloudinaryUpload.ts` | Signs browser-direct uploads (`signUploadParams`, `mintBlogUploadTicket`, `blogUploadFolder`). Holds the API secret; scopes every ticket to one post's `blog/<slug>-<postId>/` folder and to image formats, both inside the signature. |
 
 The `inquiries.ts` / `inquiryLimits.ts` split exists solely to enforce that last
 point. If you need a constant on both sides, it goes in `inquiryLimits.ts`.
@@ -647,8 +647,26 @@ Missing-credential errors are raised deliberately with instructions
     the value is interpolated into a delivery URL and a signed upload ticket
     constrains Cloudinary, not what a hand-crafted POST can put in a form
     field. Uploads are browser-direct under a signed, scope-limited ticket
-    (`lib/cloudinaryUpload.ts`) and land in `blog/`, which the catalog cannot
-    see because `getCatalog()` reads only subfolders of `art/`.
+    (`lib/cloudinaryUpload.ts`) and land in `blog/<slug>-<postId>/`, which the
+    catalog cannot see because `getCatalog()` reads only subfolders of `art/`.
+    The slug half makes the folder recognisable in the Cloudinary console; the
+    id half keeps it unique. `COVER_PUBLIC_ID_RE` checks the URL-safe alphabet
+    but deliberately does NOT try to parse a post id back out of the folder —
+    both halves share the `[a-z0-9-]` alphabet, so there is no unambiguous
+    boundary. The tie to a post is enforced where the folder is built.
+15. **A post id reaching `blogUploadFolder()` must already be validated.** The
+    folder path is interpolated from it and then SIGNED, so an id containing
+    `/` or `.` would mint a valid signature for a folder of the caller's
+    choosing — `blog/../art/photography`, say. `isValidPostId()` forbids both
+    characters outright, `COVER_PUBLIC_ID_RE` is built from the same pattern
+    so the folder it accepts cannot drift from the folder that gets signed,
+    and `mintBlogUploadTicket()` throws rather than sanitising: quietly
+    rewriting a bad id would produce a signature nobody asked for and the
+    caller could not tell. The route also confirms the post exists, which is
+    a correctness property rather than a safety one — it keeps
+    "every post folder belongs to a real post" true, and is where the slug in
+    the folder name comes from (never the request body, which would let a
+    caller name the signed folder).
 
 ---
 

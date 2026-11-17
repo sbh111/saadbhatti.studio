@@ -245,9 +245,18 @@ written at `/admin/blog`:
 3. **Images** — **upload a cover** or **insert an image** sends the file straight from your
    browser to Cloudinary under a short-lived signed ticket, so it never passes through the
    serverless function (and is not subject to its 4.5 MB body limit). Uploads land in the
-   `blog/` folder, which the artwork catalog cannot see. A body image is inserted as Markdown
-   at your cursor; fill in its alt text in the brackets. Removing a cover detaches it from the
-   post — nothing in this app ever deletes a Cloudinary asset.
+   post's own folder, named `blog/<slug>-<post-id>/` — e.g.
+   `blog/on-shooting-portra-clq2x8k9p0000abcd1234efgh/`. The artwork catalog cannot see it.
+   Both halves of the name earn their place: the slug is what lets you recognise a folder in
+   the Cloudinary console, and the id is what keeps it unique when two posts share a title.
+   Grouping per post matters because nothing in this app ever deletes a Cloudinary asset — a
+   flat folder would only grow, while per-post folders keep an abandoned post's images
+   identifiable as a unit when you clear them out by hand. **One wrinkle:** renaming a draft
+   after uploading leaves the earlier images in the old folder, so a post can span two. Both
+   carry the same id, so they are still recognisable as one post's; the alternative was
+   freezing the name at first upload, which trades this for folder names that go stale after a
+   retitle. A body image is inserted as Markdown at your cursor; fill in its alt text in the
+   brackets. Removing a cover detaches it from the post rather than deleting the file.
 4. **Preview** a draft at `/admin/blog/<id>/preview` — it renders through the same component
    visitors get, so the preview cannot drift from production. That matters more with Markdown
    than it did with plain text, because the output is no longer something you can predict by
