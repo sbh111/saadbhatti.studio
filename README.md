@@ -238,23 +238,42 @@ written at `/admin/blog`:
 
 1. **`/admin/blog`** — every post, filterable by state (`?status=draft` and friends; the filter is
    in the URL so a view is bookmarkable). Type a title and hit **new draft** to start one.
-2. **The editor** — title, slug, excerpt and body, with a **save** button and an unsaved-changes
-   warning if you try to leave with edits pending. Body is **plain text** for now: blank lines and
-   indentation are preserved and no markup is interpreted, so there is nothing to sanitise.
-   Markdown is the next phase.
-3. **Preview** a draft at `/admin/blog/<id>/preview` — it renders through the same component
-   visitors get, so the preview cannot drift from production. Drafts deliberately 404 on the
-   public URL; previewing there would mean reading the session on a public page and would make the
-   whole site dynamic.
-4. **publish** puts it live at `/blog/<slug>` and on the `/blog` index immediately (the cache is
+2. **The editor** — title, slug, excerpt, cover image and body, with a **save** button and an
+   unsaved-changes warning if you try to leave with edits pending. The body is **Markdown**
+   (headings, lists, links, quotes, code, tables, images), with a live character count and
+   reading-time estimate.
+3. **Images** — **upload a cover** or **insert an image** sends the file straight from your
+   browser to Cloudinary under a short-lived signed ticket, so it never passes through the
+   serverless function (and is not subject to its 4.5 MB body limit). Uploads land in the
+   `blog/` folder, which the artwork catalog cannot see. A body image is inserted as Markdown
+   at your cursor; fill in its alt text in the brackets. Removing a cover detaches it from the
+   post — nothing in this app ever deletes a Cloudinary asset.
+4. **Preview** a draft at `/admin/blog/<id>/preview` — it renders through the same component
+   visitors get, so the preview cannot drift from production. That matters more with Markdown
+   than it did with plain text, because the output is no longer something you can predict by
+   reading the source. Drafts deliberately 404 on the public URL; previewing there would mean
+   reading the session on a public page and would make the whole site dynamic.
+5. **publish** puts it live at `/blog/<slug>` and on the `/blog` index immediately (the cache is
    invalidated on the spot, not on a timer). **unpublish** returns it to draft, **archive** takes
-   it off the site but keeps it in the admin list, **delete** is permanent.
+   it off the site but keeps it in the admin list (**restore to draft** brings it back), **delete**
+   is permanent.
 
-Two rules worth knowing:
+Rules worth knowing:
 
 - **An excerpt is required to publish** (the index renders it), but not to save a draft.
 - **A published post's slug is locked.** It is editable only while the post is a draft, because
   once published the URL is something a reader may already have shared.
+- **Raw HTML in a body is shown as text, not rendered**, and only `http`/`https`/`mailto` links
+  survive. `marked` does neither of those by itself — it emits raw HTML verbatim and happily
+  builds a `javascript:` link — so `lib/markdown.ts` is load-bearing security code, not
+  formatting polish. See [docs/architecture.md](docs/architecture.md) invariant 13.
+- **A body `#` heading renders as `<h2>`.** The post title is the page's only `<h1>`.
+- **Reading time is an estimate** from a word count over the raw Markdown, so a link-heavy post
+  reads slightly long. It is derived at read time rather than stored, so it can never disagree
+  with the body.
+- **Posts written before Markdown may read differently now.** A line starting with `#` or `*` is
+  no longer literal. Phase 0 shipped with no published posts, so in practice this affects
+  nothing — but it is the reason the switch happened early.
 
 **The public blog pages read Postgres, which no other public page does.** That is deliberate and
 fenced in: reads are cached for an hour and tagged, `next build` never issues the query (so a

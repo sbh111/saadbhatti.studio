@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { imageUrl } from "@/lib/cloudinary";
 import { content } from "@/lib/content";
 import { formatPostDate } from "@/lib/postDate";
 import { listPublishedPosts } from "@/lib/posts";
@@ -56,15 +57,36 @@ export default async function BlogIndex() {
           <li key={post.slug} className="border-t border-ink-faint/20">
             <Link
               href={postHref(post.slug)}
-              className="block py-4 hover:bg-nav-active/50"
+              className="flex gap-4 py-4 hover:bg-nav-active/50"
             >
-              <div className="text-lg font-medium text-ink">{post.title}</div>
-              <div className="mt-0.5 text-[13px] text-ink-faint">
-                {formatPostDate(post.publishedAt)}
+              {post.cover && (
+                // alt="" on purpose: the card's own title is the link text, so
+                // a described thumbnail would make a screen reader announce
+                // the same post twice. The cover's real alt text belongs on
+                // the post page, where the image is content rather than
+                // decoration.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imageUrl(post.cover.publicId, 320)}
+                  alt=""
+                  width={120}
+                  height={80}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-[80px] w-[120px] shrink-0 rounded-[2px] border border-hairline bg-placeholder object-cover"
+                />
+              )}
+              <div className="min-w-0">
+                <div className="text-lg font-medium text-ink">{post.title}</div>
+                <div className="mt-0.5 text-[13px] text-ink-faint">
+                  {formatPostDate(post.publishedAt)}
+                  {post.readingMinutes > 0 &&
+                    ` · ${post.readingMinutes} min read`}
+                </div>
+                <p className="mt-1.5 text-[15px] text-ink-muted">
+                  {post.excerpt}
+                </p>
               </div>
-              <p className="mt-1.5 text-[15px] text-ink-muted">
-                {post.excerpt}
-              </p>
             </Link>
           </li>
         ))}

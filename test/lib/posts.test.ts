@@ -64,21 +64,95 @@ describe("listPublishedPosts", () => {
         slug: "a",
         title: "A",
         excerpt: "x",
+        body: "one two three",
         publishedAt: new Date("2026-11-16T10:00:00.000Z"),
+        coverPublicId: null,
+        coverAlt: null,
+        coverWidth: null,
+        coverHeight: null,
       },
     ]);
     const { posts, degraded } = await listPublishedPosts();
     expect(degraded).toBe(false);
     // ISO strings, not Date objects: values crossing Next's data cache are
     // serialized, so a Date is not guaranteed to survive as a Date.
+    //
+    // Note what is NOT here: `body`. The index reads it to count words and
+    // then discards it, so the cached value stays small no matter how long
+    // the posts are.
     expect(posts).toEqual([
       {
         slug: "a",
         title: "A",
         excerpt: "x",
         publishedAt: "2026-11-16T10:00:00.000Z",
+        readingMinutes: 1,
+        cover: null,
       },
     ]);
+  });
+
+  it("flattens the four cover columns into one present-or-absent value", async () => {
+    findMany.mockResolvedValue([
+      {
+        slug: "a",
+        title: "A",
+        excerpt: "x",
+        body: "hi",
+        publishedAt: new Date("2026-11-16T10:00:00.000Z"),
+        coverPublicId: "blog/kq3n8x",
+        coverAlt: "a lake at dusk",
+        coverWidth: 3000,
+        coverHeight: 2000,
+      },
+    ]);
+    const { posts } = await listPublishedPosts();
+    expect(posts[0].cover).toEqual({
+      publicId: "blog/kq3n8x",
+      alt: "a lake at dusk",
+      width: 3000,
+      height: 2000,
+    });
+  });
+
+  it("treats a cover with no alt as decorative rather than as missing", async () => {
+    // "" is a deliberate statement (alt="" is correct for a decorative
+    // image); null in the column means nobody filled it in. Both render the
+    // same way, so they collapse to "".
+    findMany.mockResolvedValue([
+      {
+        slug: "a",
+        title: "A",
+        excerpt: "x",
+        body: "hi",
+        publishedAt: new Date("2026-11-16T10:00:00.000Z"),
+        coverPublicId: "blog/kq3n8x",
+        coverAlt: null,
+        coverWidth: null,
+        coverHeight: null,
+      },
+    ]);
+    const { posts } = await listPublishedPosts();
+    expect(posts[0].cover).toEqual({
+      publicId: "blog/kq3n8x",
+      alt: "",
+      width: null,
+      height: null,
+    });
+  });
+
+  it("reads the body so it can report reading time", async () => {
+    // Guards the trade recorded in lib/posts.ts: the index pays to read
+    // bodies it never renders, rather than carrying a denormalised
+    // readingMinutes column that can drift. If someone drops `body` from
+    // this select to save I/O, reading time silently becomes 0.
+    findMany.mockResolvedValue([]);
+    await listPublishedPosts();
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({ body: true }),
+      })
+    );
   });
 
   it("DEGRADES rather than throwing when the database is unreachable", async () => {
@@ -144,6 +218,10 @@ describe("getPublishedPost", () => {
       excerpt: "x",
       body: "hello",
       publishedAt: new Date("2026-11-16T10:00:00.000Z"),
+      coverPublicId: null,
+      coverAlt: null,
+      coverWidth: null,
+      coverHeight: null,
     });
     await expect(getPublishedPost("a")).resolves.toEqual({
       slug: "a",
@@ -151,7 +229,43 @@ describe("getPublishedPost", () => {
       excerpt: "x",
       body: "hello",
       publishedAt: "2026-11-16T10:00:00.000Z",
+      readingMinutes: 1,
+      cover: null,
     });
+  });
+
+  it("reports the same reading time the index would", async () => {
+    // Both surfaces derive it from the body with the same function, so a post
+    // cannot advertise "3 min" on the index and "4 min" on the page.
+    const body = Array(440).fill("word").join(" ");
+    findFirst.mockResolvedValue({
+      slug: "a",
+      title: "A",
+      excerpt: "x",
+      body,
+      publishedAt: new Date("2026-11-16T10:00:00.000Z"),
+      coverPublicId: null,
+      coverAlt: null,
+      coverWidth: null,
+      coverHeight: null,
+    });
+    findMany.mockResolvedValue([
+      {
+        slug: "a",
+        title: "A",
+        excerpt: "x",
+        body,
+        publishedAt: new Date("2026-11-16T10:00:00.000Z"),
+        coverPublicId: null,
+        coverAlt: null,
+        coverWidth: null,
+        coverHeight: null,
+      },
+    ]);
+    const post = await getPublishedPost("a");
+    const { posts } = await listPublishedPosts();
+    expect(post?.readingMinutes).toBe(2);
+    expect(posts[0].readingMinutes).toBe(2);
   });
 });
 

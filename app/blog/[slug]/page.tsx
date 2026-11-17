@@ -67,6 +67,8 @@ export default async function PostView({
       title={post.title}
       publishedAt={post.publishedAt}
       body={post.body}
+      readingMinutes={post.readingMinutes}
+      cover={post.cover}
     />
   );
 }

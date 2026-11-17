@@ -144,11 +144,38 @@ model Post {
   /// Owner-authored, never auto-truncated from the body.
   excerpt String @db.VarChar(300)
 
-  /// Named `body`, NOT `bodyMarkdown`: Phase 0 renders it as plain text with
-  /// `whitespace-pre-wrap`, so Phase 1 adding Markdown is a RENDERING change
-  /// rather than a migration. Long bodies are TOASTed out-of-line by Postgres
-  /// automatically, so `SELECT id, title, status` never pays for them.
+  /// Markdown, as of Phase 1 — and still named `body` rather than
+  /// `bodyMarkdown`, which is exactly why Phase 1 needed no migration for it:
+  /// the change was lib/markdown.ts plus a renderer, not a column. Long bodies
+  /// are TOASTed out-of-line by Postgres automatically, so
+  /// `SELECT id, title, status` never pays for them.
   body String @db.VarChar(60000)
+
+  /// Cover image: a Cloudinary public_id (e.g. "blog/kq3n8x"), never a
+  /// delivery URL. Same stable-key rule as `Inquiry.artworkPublicId` and
+  /// `Like.artworkPublicId` — storing a URL would bake today's transformation
+  /// parameters into the database, so changing the cap or the format later
+  /// would mean rewriting rows instead of editing lib/cloudinary.ts.
+  ///
+  /// Uploaded browser-direct under a signed ticket (lib/cloudinaryUpload.ts)
+  /// into the `blog/` folder, which the catalog cannot see because
+  /// `getCatalog()` reads only subfolders of CATALOG_ROOT_FOLDER ("art").
+  coverPublicId String? @db.VarChar(255)
+
+  /// Alt text for the cover. Nullable and separate from the title on purpose:
+  /// a cover that merely decorates wants `alt=""`, and reusing the title would
+  /// make a screen reader read it twice.
+  coverAlt String? @db.VarChar(200)
+
+  /// Intrinsic pixel dimensions as Cloudinary reported them at upload. Stored
+  /// so the cover's aspect ratio can be reserved before the image loads (no
+  /// layout shift) WITHOUT a round trip to the Admin API during a render.
+  ///
+  /// Raw width/height rather than a precomputed ratio because Phase 5's
+  /// Open Graph tags need `og:image:width` / `og:image:height` as integers;
+  /// a ratio cannot be turned back into them.
+  coverWidth  Int?
+  coverHeight Int?
 
   status PostStatus @default(DRAFT)
 

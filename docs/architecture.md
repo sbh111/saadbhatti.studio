@@ -144,7 +144,7 @@ survive an artwork being renamed, reordered, or deleted.
 | `catalog.ts` | **The domain model.** Turns Cloudinary's folder tree into `CatalogMedium[] → CatalogCollection[] → CatalogArtwork[]`. Also exposes `getArtworkIndex()` (flat `public_id → artwork + location` map). |
 | `artworkFields.ts` | Client-safe single source of truth for the title's and each metadata field's context read chain (`TITLE_KEYS`, `METADATA_FIELDS`, `FIELD_KEYS`). `catalog.ts`, the admin artworks route, `AdminProvider.tsx`, and `ArtworkCaption.tsx` all derive from it — adding a field is a one-line change here (tech-debt.md 3.1). |
 | `cloudinaryAdmin.ts` | Low-level authenticated Admin API client. Everything that reads or **mutates** Cloudinary. Holds the API key/secret. `fetchAllPages()` follows `next_cursor` for every paginated read `catalog.ts` and `reorderCollection` make, so a collection or folder list past one page no longer silently truncates (tech-debt.md 2.2). |
-| `cloudinary.ts` | Pure URL builders for image delivery (`imageUrl`, `imageSrcSet`, `blurUrl`) + `CLOUD_NAME`. No secrets — safe anywhere. |
+| `cloudinary.ts` | Pure URL builders for image delivery (`imageUrl`, `imageSrcSet`, `blurUrl`, `bodyImageUrl`) + `CLOUD_NAME`. No secrets — safe anywhere, client included, which is why `bodyImageUrl` lives here and not in `markdown.ts` (that one imports `marked`). |
 | `content.ts` | Types + loads `content.json`. |
 | `nav.ts` | Builds the sidebar tree from the catalog (`buildNavTree`) and the admin node (`buildAdminNavNode`). Pure, serializable. |
 | `auth.ts` | Session (iron-session), `isAdmin()`, `verifyCredentials()`. Holds bcrypt. |
@@ -160,6 +160,13 @@ survive an artwork being renamed, reordered, or deleted.
 | `sessionId.ts` | Client-side per-tab session id (sessionStorage) used to key events and likes. |
 | `clip.ts` | The CLIP **text** encoder (transformers.js/ONNX) used by `/api/search`; the image side lives in `embed/`. |
 | `constants.ts` | Single-source-of-truth magic values shared across files that must not drift (site origin, cache tag, revalidate window, layout numbers). |
+| `urls.ts` | Every public URL into the catalog **and** the blog, built in one place (`ART_BASE_PATH`, `BLOG_BASE_PATH`, `postHref`, `postUrl`). See invariant 10 for why. |
+| `posts.ts` | The blog's data layer: three cache layers, the deliberate degrade/re-throw asymmetry, and the uncached admin reads. |
+| `blogLimits.ts` | Field bounds and validators (`isValidSlug`, `isValidCoverPublicId`, `parseCoverDimension`) with **no server imports** — the `inquiryLimits.ts` split, for the same reason. |
+| `postDate.ts` | UTC-pinned date formatter for post bytes that get prerendered, so the HTML is identical across Vercel regions. |
+| `markdown.ts` | **Security code.** Markdown → hardened HTML for post bodies: raw HTML escaped to text, link/image schemes allowlisted, headings demoted. The only thing `dangerouslySetInnerHTML` is ever given (invariant 13). |
+| `readingTime.ts` | Word-count reading estimate. Pure and server-import-free, so the editor shows the same number the public pages do. |
+| `cloudinaryUpload.ts` | Signs browser-direct uploads (`signUploadParams`, `mintBlogUploadTicket`). Holds the API secret; scopes every ticket to `blog/` and to image formats, both inside the signature. |
 
 The `inquiries.ts` / `inquiryLimits.ts` split exists solely to enforce that last
 point. If you need a constant on both sides, it goes in `inquiryLimits.ts`.
@@ -585,6 +592,13 @@ Missing-credential errors are raised deliberately with instructions
    on a database failure, a single post **re-throws**. Catching in the latter
    would make the page call `notFound()`, and Next would cache that 404 for a
    post that really exists.
+
+   One consequence of (a) worth knowing: the index's cached read selects
+   `body` purely to count words for reading time, and discards it. That is a
+   deliberate trade against a denormalised `readingMinutes` column, which
+   could drift from the body it describes. It is also the one query here whose
+   cost scales with content rather than traffic — `lib/posts.ts` records the
+   point at which to revisit it.
 3. **The proxy is not a security boundary.** Every protected page/handler calls
    `isAdmin()` itself.
 4. **`/api/inquiries` must stay outside `/api/admin/`.**
@@ -609,6 +623,32 @@ Missing-credential errors are raised deliberately with instructions
     a `DRAFT` and locked from the first publish onward (`savePostAction`
     ignores a submitted slug on a published post). Same lesson as 11, applied
     to a URL a reader may already have shared.
+13. **`dangerouslySetInnerHTML` appears in exactly one place, and only ever
+    takes `renderMarkdown()` output.** That place is
+    `components/PostArticle.tsx`, rendering an owner-authored post body.
+
+    `marked` has had no `sanitize` option since v5: it emits raw HTML verbatim
+    and does not filter URL schemes — verified against the installed 18.2.1,
+    where `<script>alert(1)</script>` passes through unchanged and
+    `[x](javascript:alert(1))` becomes a working link. So the three renderer
+    overrides in `lib/markdown.ts` (escape every raw-HTML token;
+    scheme-allowlist links and images through `URL.protocol`; demote headings)
+    are the entire defence rather than belt-and-braces, and
+    `test/lib/markdown.test.ts` is written as a set of attacks for that
+    reason. Removing any one of them reintroduces stored XSS.
+
+    **Phase 3's visitor comments must not come through here.** A comment body
+    renders as escaped plain text. The invariant is about owner-authored
+    Markdown; widening it to anything a visitor can submit is the mistake this
+    is written down to prevent.
+14. **A cover image is stored as a Cloudinary `public_id`, never a URL.** Same
+    stable-key rule as `Inquiry.artworkPublicId`. `isValidCoverPublicId()`
+    (`lib/blogLimits.ts`) is enforced server-side in `savePostAction`, because
+    the value is interpolated into a delivery URL and a signed upload ticket
+    constrains Cloudinary, not what a hand-crafted POST can put in a form
+    field. Uploads are browser-direct under a signed, scope-limited ticket
+    (`lib/cloudinaryUpload.ts`) and land in `blog/`, which the catalog cannot
+    see because `getCatalog()` reads only subfolders of `art/`.
 
 ---
 

@@ -8,6 +8,7 @@ import {
 } from "./constants";
 import { prisma } from "./db";
 import { isValidSlug } from "./blogLimits";
+import { readingMinutes } from "./readingTime";
 import { slugify } from "./slug";
 
 /**
@@ -44,6 +45,22 @@ import { slugify } from "./slug";
  * keep Prisma's own `Date`s.
  */
 
+/**
+ * A post's cover image, flattened from the four nullable `cover*` columns into
+ * one value that is either present or absent. Callers then ask one question
+ * ("is there a cover?") instead of four, and cannot render a publicId with a
+ * missing alt by accident.
+ */
+export interface PostCover {
+  /** Cloudinary public_id under `blog/` — never a delivery URL. */
+  publicId: string;
+  /** "" is meaningful: a deliberately decorative cover. */
+  alt: string;
+  /** Intrinsic pixels, for reserving the aspect ratio. Null on older rows. */
+  width: number | null;
+  height: number | null;
+}
+
 /** One row of the public index. */
 export interface PostCard {
   slug: string;
@@ -51,11 +68,34 @@ export interface PostCard {
   excerpt: string;
   /** ISO 8601 — see the serialization note above. */
   publishedAt: string;
+  /**
+   * Derived from the body at read time, NOT stored — see the note on
+   * `readPublishedPosts` for why the index pays to read bodies it does not
+   * render, and when that stops being the right trade.
+   */
+  readingMinutes: number;
+  cover: PostCover | null;
 }
 
-/** One public post. `body` is plain text in Phase 0; Markdown arrives in Phase 1. */
+/** One public post. `body` is Markdown as of Phase 1 (see lib/markdown.ts). */
 export interface PostDetail extends PostCard {
   body: string;
+}
+
+/** The four `cover*` columns as one present-or-absent value. */
+function coverFrom(row: {
+  coverPublicId: string | null;
+  coverAlt: string | null;
+  coverWidth: number | null;
+  coverHeight: number | null;
+}): PostCover | null {
+  if (!row.coverPublicId) return null;
+  return {
+    publicId: row.coverPublicId,
+    alt: row.coverAlt ?? "",
+    width: row.coverWidth,
+    height: row.coverHeight,
+  };
 }
 
 /**
@@ -78,11 +118,44 @@ const readPublishedPosts = unstable_cache(
       // than rendering an undated post or crashing on a null.
       where: { status: PostStatus.PUBLISHED, publishedAt: { not: null } },
       orderBy: { publishedAt: "desc" },
-      select: { slug: true, title: true, excerpt: true, publishedAt: true },
+      select: {
+        slug: true,
+        title: true,
+        excerpt: true,
+        publishedAt: true,
+        coverPublicId: true,
+        coverAlt: true,
+        coverWidth: true,
+        coverHeight: true,
+        // Read, used to count words, and then DISCARDED — the body never
+        // reaches the cached value or the index's HTML.
+        //
+        // The alternative is a stored `readingMinutes` column, recomputed on
+        // every save. That was rejected: it is a denormalisation that can
+        // drift (a row edited in psql or Prisma Studio keeps a stale number)
+        // in exchange for I/O this site does not notice. Bodies are TOASTed
+        // out-of-line, this query runs ONCE per hour behind the data cache,
+        // and the blog has single digits of posts.
+        //
+        // Revisit at roughly a hundred published posts, or if bodies grow
+        // towards the 60 kB cap: a few megabytes per revalidation is the point
+        // at which the column earns its drift risk. Reading `body` here is the
+        // one thing in this file that scales with content rather than traffic.
+        body: true,
+      },
     });
-    return rows.flatMap((row) =>
+    return rows.flatMap(({ body, ...row }) =>
       row.publishedAt
-        ? [{ ...row, publishedAt: row.publishedAt.toISOString() }]
+        ? [
+            {
+              slug: row.slug,
+              title: row.title,
+              excerpt: row.excerpt,
+              publishedAt: row.publishedAt.toISOString(),
+              readingMinutes: readingMinutes(body),
+              cover: coverFrom(row),
+            },
+          ]
         : []
     );
   },
@@ -130,10 +203,22 @@ const readPublishedPost = (slug: string) =>
           excerpt: true,
           body: true,
           publishedAt: true,
+          coverPublicId: true,
+          coverAlt: true,
+          coverWidth: true,
+          coverHeight: true,
         },
       });
       if (!row?.publishedAt) return null;
-      return { ...row, publishedAt: row.publishedAt.toISOString() };
+      return {
+        slug: row.slug,
+        title: row.title,
+        excerpt: row.excerpt,
+        body: row.body,
+        publishedAt: row.publishedAt.toISOString(),
+        readingMinutes: readingMinutes(row.body),
+        cover: coverFrom(row),
+      };
     },
     ["blog:post", slug],
     {

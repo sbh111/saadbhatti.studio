@@ -295,11 +295,47 @@ also the index's sort key, which is why the public read additionally filters
 `publishedAt IS NOT NULL`: a row published by hand in psql without a date is omitted rather than
 rendered undated.
 
-`body` is plain text in Phase 0 (rendered with `whitespace-pre-wrap`, so no markup is interpreted
-and there is nothing to sanitise); the column is named `body` rather than `bodyMarkdown` so adding
-Markdown later is a rendering change, not a migration. Postgres TOASTs a value this size
-out-of-line and compressed once the row exceeds ~2 kB, so the admin list's
-`SELECT id, title, status, "updatedAt"` never pays to read a body it does not display.
+`body` holds Markdown as of Phase 1, and the column was deliberately named `body` rather than
+`bodyMarkdown` in Phase 0 precisely so that this would be a rendering change (`lib/markdown.ts`)
+rather than a migration — which is how it turned out: the Phase 1 migration adds cover columns and
+touches `body` not at all. Postgres TOASTs a value this size out-of-line and compressed once the
+row exceeds ~2 kB, so the admin list's `SELECT id, title, status, "updatedAt"` never pays to read a
+body it does not display.
+
+**Reading time is not a column.** It is derived from `body` at read time
+(`lib/readingTime.ts`), which means the public index's cached query selects `body` purely to count
+words and then discards it. A stored `readingMinutes` would save that I/O and was rejected: it is a
+denormalisation that drifts the moment a row is edited outside the app (psql, Prisma Studio), in
+exchange for a cost this site does not notice — the query runs once per hour behind the data cache,
+against single digits of posts. It is, however, the one blog query whose cost scales with content
+rather than traffic; `lib/posts.ts` records the threshold (roughly a hundred posts) at which the
+column starts to earn its drift risk.
+
+### Cover images (Phase 1)
+
+Four nullable columns — `coverPublicId`, `coverAlt`, `coverWidth`, `coverHeight` — added as a
+metadata-only `ALTER` with no backfill: a post without a cover renders exactly as it did before.
+
+`coverPublicId` is a Cloudinary `public_id`, never a delivery URL. This is the same stable-key rule
+as `inquiries.artworkPublicId` and `likes.artworkPublicId`, and for a sharper reason here: a URL
+would bake today's transformation parameters (`f_auto,q_auto,c_limit,w_2048`) into the row, so
+changing the display cap later would mean rewriting data instead of editing `lib/cloudinary.ts`.
+The width mirrors every other `public_id` column at `VARCHAR(255)`.
+
+`coverAlt` is separate from `title` and nullable, because a decorative cover wants `alt=""` and
+reusing the title would make a screen reader announce it twice. The application distinguishes the
+two: `""` means "deliberately decorative", `NULL` means "never filled in". Both render as `alt=""`,
+so they collapse on read.
+
+`coverWidth`/`coverHeight` are stored as raw integers rather than a precomputed aspect ratio so the
+cover's space can be reserved before it loads (no layout shift) without an Admin API call during a
+render — and because Phase 5's `og:image:width`/`og:image:height` need exactly these two numbers,
+which a ratio cannot be turned back into. They are reported by Cloudinary at upload, not typed by a
+human, so `parseCoverDimension()` bounds them on the way in.
+
+No index on any of the four: they are never a query predicate. A cover is only ever read as part of
+a post already located by `slug` or `id`, which is §4's rule — an index must serve a real access
+pattern rather than exist in case one appears.
 
 `ARCHIVED` exists in the enum from the first migration even though Phase 0 ships no archive
 button, because adding a value to an existing Postgres enum is a migration of its own.

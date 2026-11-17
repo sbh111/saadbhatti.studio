@@ -13,6 +13,7 @@ import {
   archivePostAction,
   deletePostAction,
   publishPostAction,
+  restorePostAction,
   savePostAction,
   unpublishPostAction,
 } from "../actions";
@@ -31,6 +32,9 @@ const ERRORS: Record<string, string> = {
   slug: "A slug must be lowercase letters, numbers and single dashes.",
   slugtaken: "Another post already uses that slug.",
   excerptrequired: "Add an excerpt before publishing — the index shows it.",
+  cover: "That cover image reference is not valid — re-upload the image.",
+  coveralt: "That alt text is too long.",
+  notarchived: "That post is not archived, so there is nothing to restore.",
   missing: "That post no longer exists.",
 };
 
@@ -39,17 +43,23 @@ export default async function EditPostPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; saved?: string; published?: string }>;
+  searchParams: Promise<{
+    error?: string;
+    saved?: string;
+    published?: string;
+    restored?: string;
+  }>;
 }) {
   if (!(await isAdmin())) redirect("/admin/login");
 
   const { id } = await params;
-  const { error, saved, published } = await searchParams;
+  const { error, saved, published, restored } = await searchParams;
   const post = await getPostById(id);
   if (!post) notFound();
 
   const isDraft = post.status === PostStatus.DRAFT;
   const isPublished = post.status === PostStatus.PUBLISHED;
+  const isArchived = post.status === PostStatus.ARCHIVED;
   const action =
     "rounded-[2px] border border-hairline px-3 py-1.5 text-[13px] text-ink-muted hover:text-steel";
 
@@ -85,6 +95,11 @@ export default async function EditPostPage({
       {saved && !error && (
         <p className="mt-2 text-[13px] text-ink-muted">Saved.</p>
       )}
+      {restored && !error && (
+        <p className="mt-2 text-[13px] text-ink-muted">
+          Restored to draft.
+        </p>
+      )}
       {published && !error && (
         <p className="mt-2 text-[13px] text-ink-muted">
           Published —{" "}
@@ -101,6 +116,10 @@ export default async function EditPostPage({
         initialSlug={post.slug}
         initialExcerpt={post.excerpt}
         initialBody={post.body}
+        initialCoverPublicId={post.coverPublicId ?? ""}
+        initialCoverAlt={post.coverAlt ?? ""}
+        initialCoverWidth={post.coverWidth}
+        initialCoverHeight={post.coverHeight}
         slugEditable={isDraft}
         saveAction={savePostAction}
       />
@@ -135,11 +154,24 @@ export default async function EditPostPage({
           </>
         )}
 
-        {post.status !== PostStatus.ARCHIVED && (
+        {/* Archive is reversible, which is what makes it the safe
+            alternative to delete: an archived post 404s publicly but stays in
+            the admin list, and "restore to draft" brings it back with its
+            original publishedAt intact. */}
+        {!isArchived && (
           <form action={archivePostAction}>
             <input type="hidden" name="id" value={post.id} />
             <button type="submit" className={action}>
               archive
+            </button>
+          </form>
+        )}
+
+        {isArchived && (
+          <form action={restorePostAction}>
+            <input type="hidden" name="id" value={post.id} />
+            <button type="submit" className={action}>
+              restore to draft
             </button>
           </form>
         )}

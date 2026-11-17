@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { isAdmin } from "@/lib/auth";
 import { content } from "@/lib/content";
 import { getPostById } from "@/lib/posts";
+import { readingMinutes } from "@/lib/readingTime";
 import PostArticle from "@/components/PostArticle";
 
 /**
@@ -49,10 +50,24 @@ export default async function PreviewPostPage({
           ← back to editor
         </Link>
       </div>
+      {/* Reading time and the cover are derived here exactly as lib/posts.ts
+          derives them for the public page, so a preview cannot disagree with
+          what a visitor gets. */}
       <PostArticle
         title={post.title}
         publishedAt={post.publishedAt ? post.publishedAt.toISOString() : null}
         body={post.body}
+        readingMinutes={readingMinutes(post.body)}
+        cover={
+          post.coverPublicId
+            ? {
+                publicId: post.coverPublicId,
+                alt: post.coverAlt ?? "",
+                width: post.coverWidth,
+                height: post.coverHeight,
+              }
+            : null
+        }
       />
     </div>
   );

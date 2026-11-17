@@ -29,6 +29,7 @@
     "@vercel/analytics": "^2.0.1",
     "bcryptjs": "^3.0.3",
     "iron-session": "^8.0.4",
+    "marked": "^18.2.1",
     "next": "^16.2.10",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

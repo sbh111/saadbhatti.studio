@@ -7,7 +7,15 @@ import { isAdmin } from "@/lib/auth";
 import { BLOG_CACHE_TAG, blogPostTag } from "@/lib/constants";
 import { prisma } from "@/lib/db";
 import { boundedStr, str } from "@/lib/http";
-import { BODY_MAX, EXCERPT_MAX, TITLE_MAX, isValidSlug } from "@/lib/blogLimits";
+import {
+  BODY_MAX,
+  COVER_ALT_MAX,
+  EXCERPT_MAX,
+  TITLE_MAX,
+  isValidCoverPublicId,
+  isValidSlug,
+  parseCoverDimension,
+} from "@/lib/blogLimits";
 import { uniqueSlugFor } from "@/lib/posts";
 
 /**
@@ -116,9 +124,53 @@ export async function savePostAction(formData: FormData) {
     }
   }
 
+  // ── Cover image ───────────────────────────────────────────────────────
+  // The browser uploaded straight to Cloudinary and put the resulting
+  // public_id in a hidden input; what arrives here is a reference, never
+  // bytes. An empty public_id means "remove the cover", which detaches it
+  // from the post — the asset itself is left alone, because nothing in this
+  // app ever deletes from Cloudinary (docs/architecture.md).
+  //
+  // Validated rather than trusted even though only the owner can submit it:
+  // this value is interpolated into a delivery URL, and a signed upload
+  // ticket does not constrain what a hand-crafted POST can put in this field.
+  let cover: {
+    coverPublicId: string | null;
+    coverAlt: string | null;
+    coverWidth: number | null;
+    coverHeight: number | null;
+  } = {
+    coverPublicId: null,
+    coverAlt: null,
+    coverWidth: null,
+    coverHeight: null,
+  };
+  const submittedCover = str(formData.get("coverPublicId"));
+  if (submittedCover) {
+    if (!isValidCoverPublicId(submittedCover)) {
+      redirect(`/admin/blog/${id}?error=cover`);
+    }
+    const alt = str(formData.get("coverAlt"));
+    if (alt.length > COVER_ALT_MAX) {
+      redirect(`/admin/blog/${id}?error=coveralt`);
+    }
+    cover = {
+      coverPublicId: submittedCover,
+      // "" is kept as "" rather than coerced to null: an empty alt is a
+      // deliberate statement that the image is decorative, and `alt=""` is
+      // the correct output for that. Null would mean "never filled in".
+      coverAlt: alt,
+      // Absent or implausible dimensions degrade to null rather than
+      // rejecting the save — they are a layout nicety, and an older row that
+      // predates them must stay editable.
+      coverWidth: parseCoverDimension(formData.get("coverWidth")) ?? null,
+      coverHeight: parseCoverDimension(formData.get("coverHeight")) ?? null,
+    };
+  }
+
   await prisma.post.update({
     where: { id },
-    data: { title, excerpt, body, slug },
+    data: { title, excerpt, body, slug, ...cover },
   });
 
   // Both slugs: the old one so its cached page stops serving stale content,
@@ -196,6 +248,38 @@ export async function archivePostAction(formData: FormData) {
   });
   revalidateBlog(existing.slug);
   redirect(`/admin/blog/${id}`);
+}
+
+/**
+ * ARCHIVED → DRAFT. The inverse of `archivePostAction`, and the reason
+ * archiving is safe to use freely.
+ *
+ * A separate action rather than reusing `unpublishPostAction` (which would do
+ * the same write) because the status guard below makes the intent explicit:
+ * this only ever touches an archived post, so a stale form or a double-click
+ * cannot quietly unpublish a live one. `publishedAt` is left untouched, so a
+ * post that is archived and later re-published keeps its original date and
+ * does not jump to the top of the index.
+ */
+export async function restorePostAction(formData: FormData) {
+  if (!(await isAdmin())) return;
+  const id = str(formData.get("id"));
+  if (!id) return;
+  const existing = await prisma.post.findUnique({
+    where: { id },
+    select: { slug: true, status: true },
+  });
+  if (!existing) return;
+  if (existing.status !== PostStatus.ARCHIVED) {
+    redirect(`/admin/blog/${id}?error=notarchived`);
+  }
+
+  await prisma.post.update({
+    where: { id },
+    data: { status: PostStatus.DRAFT },
+  });
+  revalidateBlog(existing.slug);
+  redirect(`/admin/blog/${id}?restored=1`);
 }
 
 export async function deletePostAction(formData: FormData) {

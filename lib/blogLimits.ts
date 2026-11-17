@@ -28,3 +28,54 @@ export const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export function isValidSlug(value: string): boolean {
   return value.length > 0 && value.length <= SLUG_MAX && SLUG_RE.test(value);
 }
+
+/** Cloudinary public_id of a cover image, e.g. "blog/kq3n8xj2". */
+export const COVER_PUBLIC_ID_MAX = 255;
+
+/** Alt text for a cover image. Short on purpose — it is read aloud. */
+export const COVER_ALT_MAX = 200;
+
+/**
+ * A cover image's public_id must name an asset inside the `blog/` folder and
+ * contain nothing that could change the meaning of a URL.
+ *
+ * This is validated rather than trusted because the value is interpolated
+ * straight into a Cloudinary delivery URL by `imageUrl()` (lib/cloudinary.ts).
+ * Only the owner can submit one today, so the realistic risk is a typo rather
+ * than an attack — but the check costs a regex and removes the question.
+ *
+ * Alphanumerics, underscore and dash only, after the required `blog/` prefix:
+ *   - no `.`, so `..` can never appear and no traversal is expressible
+ *   - no `/` beyond the prefix, so the folder cannot be escaped
+ *   - no `,` or `:`, which are Cloudinary's own transformation separators —
+ *     a public_id containing them could otherwise inject transformations
+ *
+ * Cloudinary auto-generates ids from this alphabet (the upload is signed
+ * WITHOUT `use_filename`, so an original filename never becomes the id), and
+ * the extension is not part of a public_id at all.
+ */
+export const COVER_PUBLIC_ID_RE = /^blog\/[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+export function isValidCoverPublicId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= COVER_PUBLIC_ID_MAX &&
+    COVER_PUBLIC_ID_RE.test(value)
+  );
+}
+
+/**
+ * Cover dimensions are reported by Cloudinary, not typed by a human, so the
+ * bound here is a sanity check on a number that arrives over the wire rather
+ * than a UI limit. 20000 is comfortably past any real photograph and well
+ * inside Postgres `INTEGER`.
+ */
+export const COVER_DIMENSION_MAX = 20_000;
+
+/** A positive, integral pixel dimension within bounds, or undefined. */
+export function parseCoverDimension(value: unknown): number | undefined {
+  const n = typeof value === "string" ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isInteger(n)) return undefined;
+  if (n < 1 || n > COVER_DIMENSION_MAX) return undefined;
+  return n;
+}
