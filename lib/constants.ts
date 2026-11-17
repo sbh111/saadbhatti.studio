@@ -49,3 +49,36 @@ export const CATALOG_REVALIDATE_SECONDS = 3600;
  * silently rewrite every public URL on the site.
  */
 export const CATALOG_ROOT_FOLDER = "art";
+
+/**
+ * Cache tag for every blog read (lib/posts.ts) — the catalog's
+ * CATALOG_CACHE_TAG twin. Invalidated by the admin post lifecycle actions, so
+ * publishing a post is cache invalidation rather than a deploy.
+ */
+export const BLOG_CACHE_TAG = "blog";
+
+/**
+ * Per-post tag, so editing one post does not restage every other post's
+ * cached HTML.
+ */
+export function blogPostTag(slug: string): string {
+  return `blog:post:${slug}`;
+}
+
+/**
+ * How long a cached blog read may go stale, in seconds.
+ *
+ * Unlike CATALOG_REVALIDATE_SECONDS this one can actually be IMPORTED where
+ * it is used, because it is passed as an `unstable_cache` option (an ordinary
+ * runtime argument) rather than declared as a route segment `export const
+ * revalidate` — Next reads segment config statically at build time and cannot
+ * resolve an imported constant there, which is why the layout's copy has to be
+ * a hand-synced literal.
+ *
+ * It matches the catalog's hour deliberately: Next reduces a route's ISR
+ * window to the MINIMUM revalidate of everything the render touched, so a
+ * shorter value here would silently drag /blog and /blog/[slug] down with it
+ * and put a database read on every window. Owner edits propagate immediately
+ * via updateTag regardless, so a long window costs nothing.
+ */
+export const BLOG_REVALIDATE_SECONDS = 3600;

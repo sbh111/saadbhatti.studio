@@ -15,7 +15,19 @@ jobs:
           node-version-file: ".nvmrc"
           cache: "npm"
 
+      # onnxruntime-node (transitive, via @huggingface/transformers) tries to
+      # download CUDA execution-provider binaries from a GitHub release asset
+      # that began 404ing on 2026-11-17, which fails `npm ci` outright. There
+      # is no GPU anywhere in this system — the CLIP text encoder runs on CPU
+      # in a serverless function — so the CUDA EP is pure download weight, and
+      # skipping it is onnxruntime's own documented remedy.
+      #
+      # .npmrc sets the same thing for fresh clones and for Vercel's install
+      # step. This is the env-var form, which npm does not warn about; keeping
+      # both means CI stays green if the .npmrc key is dropped by a future npm.
       - run: npm ci
+        env:
+          ONNXRUNTIME_NODE_INSTALL_CUDA: skip
 
       - run: npm run lint
       - run: npm run typecheck
@@ -24,13 +36,29 @@ jobs:
       # `next build` statically generates the public pages, which call the
       # real Cloudinary Admin API for the catalog (see README "Cloudinary API
       # credentials") — these must be real, read-only credentials from repo
-      # secrets. DATABASE_URL/DIRECT_URL only need to be well-formed: Prisma's
-      # generated client reads them at construction time, but nothing on any
-      # statically-built page ever issues a query, so an unreachable
-      # placeholder is deliberate here — never point this at a real database.
+      # secrets.
+      #
+      # DATABASE_URL/DIRECT_URL point at an unreachable placeholder ON PURPOSE,
+      # and that is now a real test rather than a formality. /blog DOES query
+      # Postgres during prerendering (it is the first public page that reads the
+      # database at all), so this step proves the query DEGRADES instead of
+      # failing the build — see listPublishedPosts in lib/posts.ts. If this step
+      # ever fails on a database error, something has made a required query out
+      # of an optional one, and a Vercel deploy would then be coupled to Neon's
+      # availability and to the manually applied migration having landed first.
+      #
+      # `connect_timeout=5` bounds the failure: an address that DROPS packets
+      # rather than refusing them would otherwise hang the build until Prisma's
+      # default timeout. Never point this at a real database.
       - run: npx next build
         env:
           CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
           CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
-          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
-          DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci"
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?connect_timeout=5"
+          DIRECT_URL: "postgresql://ci:ci@localhost:5432/ci?connect_timeout=5"
+
+      # Asserts the static/dynamic split from the build output instead of
+      # leaving it to a manual read of the route table: public routes
+      # prerendered, admin routes not, and no post prerendered at build time.
+      # docs/architecture.md §13.2 is the invariant this enforces.
+      - run: npm run verify:routes

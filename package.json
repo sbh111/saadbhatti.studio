@@ -13,6 +13,11 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "verify:routes": "node scripts/assert-static-routes.mjs",
+    "db:check": "node scripts/assert-local-db.mjs",
+    "db:migrate": "node scripts/assert-local-db.mjs && prisma migrate dev",
+    "db:reset": "node scripts/assert-local-db.mjs && prisma migrate reset",
+    "db:diff": "prisma migrate diff --from-schema-datasource prisma/schema.prisma --to-schema-datamodel prisma/schema.prisma --script",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -24,6 +29,7 @@
     "@vercel/analytics": "^2.0.1",
     "bcryptjs": "^3.0.3",
     "iron-session": "^8.0.4",
+    "marked": "^18.2.1",
     "next": "^16.2.10",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

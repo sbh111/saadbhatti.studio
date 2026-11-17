@@ -30,6 +30,18 @@ enum EmailStatus {
   FAILED
 }
 
+// A blog post's lifecycle. DRAFT is freely saveable and invisible publicly;
+// PUBLISHED is live; ARCHIVED 404s publicly but stays in the admin list.
+//
+// ARCHIVED exists from this first migration even though Phase 0 ships no
+// archive button: adding a value to a Postgres enum is a migration, and the
+// cost of declaring it now is one word.
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
 model Inquiry {
   id              String        @id @default(cuid())
   artworkPublicId String        @db.VarChar(255) // ONLY stable artwork key
@@ -103,4 +115,83 @@ model ArtworkEmbedding {
   updatedAt DateTime                   @updatedAt
 
   @@map("artwork_embeddings")
+}
+
+// A blog post — the FIRST content entity this database owns. Every other table
+// here holds side-channel data about artwork whose authoritative copy lives in
+// Cloudinary; a post's prose exists ONLY here, which is what makes
+// scripts/backup-db.sh load-bearing rather than optional (tech debt 4.3).
+//
+// No foreign keys on this table because it has no parent — unlike the artwork
+// tables, whose parent genuinely lives in another system (docs/schema-design.md
+// §1). When Phase 2 adds post_likes, those children DO get a real FK with
+// ON DELETE CASCADE: `posts` is a real row in this database, so the "parent
+// lives elsewhere" reasoning that produced the no-FK rule does not apply to
+// them.
+model Post {
+  id String @id @default(cuid())
+
+  /// PERMANENT public contract: this is the /blog/<slug> URL. Derived from the
+  /// title via slugify() (lib/slug.ts) and editable ONLY while the post is a
+  /// DRAFT — once published, changing it breaks every link ever shared, which
+  /// is the same lesson tech debt 1.8 recorded for artwork anchors. Uniqueness
+  /// is enforced here, not just by the admin create path.
+  slug String @unique @db.VarChar(160)
+
+  title String @db.VarChar(160)
+
+  /// The index-card blurb, and the meta description once Phase 5 lands.
+  /// Owner-authored, never auto-truncated from the body.
+  excerpt String @db.VarChar(300)
+
+  /// Markdown, as of Phase 1 — and still named `body` rather than
+  /// `bodyMarkdown`, which is exactly why Phase 1 needed no migration for it:
+  /// the change was lib/markdown.ts plus a renderer, not a column. Long bodies
+  /// are TOASTed out-of-line by Postgres automatically, so
+  /// `SELECT id, title, status` never pays for them.
+  body String @db.VarChar(60000)
+
+  /// Cover image: a Cloudinary public_id (e.g. "blog/kq3n8x"), never a
+  /// delivery URL. Same stable-key rule as `Inquiry.artworkPublicId` and
+  /// `Like.artworkPublicId` — storing a URL would bake today's transformation
+  /// parameters into the database, so changing the cap or the format later
+  /// would mean rewriting rows instead of editing lib/cloudinary.ts.
+  ///
+  /// Uploaded browser-direct under a signed ticket (lib/cloudinaryUpload.ts)
+  /// into the `blog/` folder, which the catalog cannot see because
+  /// `getCatalog()` reads only subfolders of CATALOG_ROOT_FOLDER ("art").
+  coverPublicId String? @db.VarChar(255)
+
+  /// Alt text for the cover. Nullable and separate from the title on purpose:
+  /// a cover that merely decorates wants `alt=""`, and reusing the title would
+  /// make a screen reader read it twice.
+  coverAlt String? @db.VarChar(200)
+
+  /// Intrinsic pixel dimensions as Cloudinary reported them at upload. Stored
+  /// so the cover's aspect ratio can be reserved before the image loads (no
+  /// layout shift) WITHOUT a round trip to the Admin API during a render.
+  ///
+  /// Raw width/height rather than a precomputed ratio because Phase 5's
+  /// Open Graph tags need `og:image:width` / `og:image:height` as integers;
+  /// a ratio cannot be turned back into them.
+  coverWidth  Int?
+  coverHeight Int?
+
+  status PostStatus @default(DRAFT)
+
+  /// Set on the FIRST transition to PUBLISHED and never rewritten, so
+  /// re-publishing an old post does not reorder the public index.
+  publishedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Serves the one hot public query — the index's
+  /// `WHERE status = 'PUBLISHED' ORDER BY "publishedAt" DESC`. `status` leads
+  /// because it is always an equality predicate. The admin list
+  /// (`ORDER BY updatedAt DESC`, optionally filtered) is a deliberate full
+  /// scan: dozens of rows, the same call schema-design.md §4 makes for the
+  /// admin likes aggregate.
+  @@index([status, publishedAt(sort: Desc)])
+  @@map("posts")
 }

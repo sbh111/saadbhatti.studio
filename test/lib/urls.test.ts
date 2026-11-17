@@ -5,8 +5,11 @@ import {
   artHref,
   artworkHref,
   artworkUrl,
+  blogHref,
   collectionHref,
   mediumHref,
+  postHref,
+  postUrl,
 } from "@/lib/urls";
 
 // lib/urls.ts exists because six files each carried their own copy of
@@ -67,5 +70,25 @@ describe("lib/urls", () => {
     expect(artworkUrl(MEDIUM, COLLECTION, ARTWORK)).toBe(
       `${SITE_ORIGIN}${artworkHref(MEDIUM, COLLECTION, ARTWORK)}`
     );
+  });
+});
+
+describe("blog urls", () => {
+  it("builds the index and a post path", () => {
+    expect(blogHref()).toBe("/blog");
+    expect(postHref("on-shooting-portra")).toBe("/blog/on-shooting-portra");
+  });
+
+  it("builds an absolute post url against the canonical www origin", () => {
+    // Not the apex: that 308-redirects, and a redirect across origins drops
+    // headers — the same reason artworkUrl uses SITE_ORIGIN.
+    expect(postUrl("on-shooting-portra")).toBe(
+      "https://www.saadbhatti.studio/blog/on-shooting-portra"
+    );
+  });
+
+  it("keeps the blog prefix off the catalog helpers and vice versa", () => {
+    expect(postHref("x").startsWith("/blog/")).toBe(true);
+    expect(blogHref().startsWith("/art")).toBe(false);
   });
 });

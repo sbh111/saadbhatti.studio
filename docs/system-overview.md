@@ -436,7 +436,8 @@ file. K3, the consumer, is unstarted.
 
 ## 11. Data model
 
-Five tables, all referencing artworks by Cloudinary `public_id`:
+Six tables. Five reference artworks by Cloudinary `public_id`; `posts` is the
+first table that owns content outright.
 
 | Table | Holds |
 |---|---|
@@ -445,9 +446,17 @@ Five tables, all referencing artworks by Cloudinary `public_id`:
 | `settings` | Generic key/value flags; currently the streaming toggle |
 | `rate_windows` | Fixed-window request counters per (bucket, IP hash, window) |
 | `artwork_embeddings` | 512-d CLIP vectors — `vector(512)`, reached only via raw SQL since Prisma has no vector type |
+| `posts` | Blog posts: slug, title, excerpt, plain-text body, lifecycle status, publish date |
+
+**`posts` changes the backup calculus.** Every other table holds data that is
+either derivable (embeddings, rate windows) or a record *about* something whose
+authoritative copy is in Cloudinary. A post's prose exists only in Postgres, so
+`scripts/backup-db.sh` stopped being optional the moment this table landed —
+and tech-debt.md 4.3 notes it has never actually been run.
 
 The migration names double as a project timeline: `init_inquiries` → `add_settings_and_likes` →
-`add_rate_windows` → `add_inquiry_email_status` → `add_artwork_embeddings`.
+`add_rate_windows` → `add_inquiry_email_status` → `add_artwork_embeddings` →
+`drop_unused_indexes` → `add_posts`.
 
 ---
 

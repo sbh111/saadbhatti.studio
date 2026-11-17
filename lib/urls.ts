@@ -54,6 +54,38 @@ export function artworkHref(
 }
 
 /**
+ * URL prefix for the blog. A sibling of ART_BASE_PATH, and routed through
+ * helpers for the same reason: the prefix is typed once here rather than
+ * reassembled at every call site.
+ */
+export const BLOG_BASE_PATH = "/blog";
+
+/** The blog index, listing every published post (app/blog/page.tsx). */
+export function blogHref(): string {
+  return BLOG_BASE_PATH;
+}
+
+/**
+ * One post, e.g. "/blog/on-shooting-portra". The slug is a permanent public
+ * contract (see the `slug` field in prisma/schema.prisma), so this path is
+ * safe to put in anything durable. Slugs come from `slugify()` and are
+ * already URL-safe, so nothing is encoded here — matching the catalog
+ * helpers above.
+ */
+export function postHref(slug: string): string {
+  return `${BLOG_BASE_PATH}/${slug}`;
+}
+
+/**
+ * `postHref` against the canonical origin — for share links and, in Phase 5,
+ * Open Graph tags. Uses SITE_ORIGIN, the same non-redirecting www host as
+ * `artworkUrl` below.
+ */
+export function postUrl(slug: string): string {
+  return `${SITE_ORIGIN}${postHref(slug)}`;
+}
+
+/**
  * `artworkHref` against the canonical origin — for anywhere a relative path is
  * useless, i.e. the inquiry-notification email body (lib/mail.ts). Uses
  * SITE_ORIGIN, the same non-redirecting www host the rest of the app uses, so
