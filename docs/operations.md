@@ -253,6 +253,91 @@ row behind a single `window.confirm`, with no soft delete, no trash, no undo (se
 plainly: a fat-fingered delete, or a bug in the delete path, is unrecoverable without one of
 the two mechanisms below.
 
+### 3.1 Incident — the production database was reset (2026-11-17)
+
+Read this before running anything that touches Postgres. It is the reason the guards below
+exist, and the mechanism is dull enough to repeat.
+
+**What happened.** A routine drift check was run while adding a migration:
+
+```bash
+npx prisma migrate diff --from-migrations prisma/migrations \
+  --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$DIRECT_URL"
+```
+
+`--shadow-database-url` means *"this database is scratch space"*: Prisma wipes the target and
+replays every migration into it to compute the diff. `$DIRECT_URL` came from `.env`, which at
+the time held the **Neon production** URLs. So it did exactly what it was asked to do, to the
+wrong database. Every table was left empty and `_prisma_migrations` was dropped.
+
+Nothing about the command was unusual, and no warning was issued — the flag's documented
+behaviour *is* destruction. **The command was not wrong. The URL was.**
+
+**Why it was possible.** Two independent causes, both now closed:
+
+1. `.env` held production credentials. That file is loaded implicitly by the Prisma CLI and
+   by Next, so *every* command run in the repo had production in reach without anyone
+   choosing it. (`.env.example` has always shipped the local Docker URLs — the committed
+   intent was right; the local file had drifted from it, most likely via `vercel env pull`.)
+   As a second-order trap, the same file exported `PGHOST`/`PGUSER`/`PGPASSWORD`, so a bare
+   `psql` with no arguments also connected to production.
+2. The credential was `neondb_owner`, which can DROP anything. A least-privilege role cannot,
+   and would have failed this command with a permission error.
+
+**What it cost.** Unknown, and unknowable after the fact: nobody had ever recorded the row
+counts, and `scripts/backup-db.sh` had never been run (tech debt 4.3), so there was no
+independent copy to compare against. The schema was intact; only rows were lost. Cloudinary
+was untouched. Two knock-on effects worth knowing: `isEventStreamingEnabled()` reads
+`settings` and **defaults off** when the row is missing, and `/api/search` returns nothing
+until the embedder repopulates `artwork_embeddings` (§1).
+
+**Recovery** was Neon instant restore — the only option, and time-bounded (see the retention
+note below; ~6 hours on Free). That window is the single most important number on this page.
+
+#### What now stops it
+
+| Guard | Catches |
+|---|---|
+| `.env` is local-only | The implicit path to production. Nothing reaches Neon by default. |
+| `.env.neon.local` | Production URLs, git-ignored and loaded by **nothing** automatically — "neon" is not a `NODE_ENV`, so Next skips it, and the Prisma CLI reads only `.env`. |
+| `npm run db:migrate` / `db:reset` | Run `scripts/assert-local-db.mjs` first, which refuses unless **both** `DATABASE_URL` and `DIRECT_URL` resolve to a local host — honouring Prisma's precedence, so a real env var overriding `.env` is still caught. Fails closed on anything it cannot parse, and matches hostnames exactly (`localhost.attacker.example.com` is remote). |
+| `scripts/with-neon-db.mjs` | The deliberate production path. Names the host, makes you type it back, refuses to run without a TTY, and **unconditionally refuses** `--shadow-database-url`, `migrate reset`, `db push` and `migrate dev` — confirming is not sufficient, because the operator who caused this *would* have confirmed. |
+| `scripts/sql/app-role.sql` | The class of mistake nobody thought to guard. A DML-only `sbh_app` role for the running app, so the omnipotent `neondb_owner` is used only for migrations, deliberately. |
+| `scripts/systemd/` | A daily `pg_dump` to `~/backups`, so "unknowable" is never the answer again. |
+
+**Use these instead of raw Prisma commands:**
+
+```bash
+npm run db:check
+```
+
+```bash
+npm run db:migrate
+```
+
+```bash
+npm run db:diff
+```
+
+`db:diff` is the drift check that should have been run: `--from-schema-datasource` reads the
+live schema and writes nothing, so it is safe against any database, production included.
+
+To act on production on purpose:
+
+```bash
+scripts/with-neon-db.mjs npx prisma migrate deploy
+```
+
+#### Still open
+
+- Swap Vercel's `DATABASE_URL`/`DIRECT_URL` to `sbh_app` (`scripts/sql/app-role.sql`, run
+  **after** any restore completes — a branch restore rewinds roles too).
+- Install the backup timer, and `sudo loginctl enable-linger $USER` so it fires while logged
+  out. A laptop timer only runs when the laptop does: Neon's restore window is the always-on
+  primary, the dump is the unbounded-retention secondary, and each covers the other's gap.
+- Run the restore drill below. It has still never been done, and an untested backup is a
+  hypothesis.
+
 ### What Neon provides — point-in-time restore
 
 Every Neon project keeps a rolling history of WAL changes and can restore to any point (or

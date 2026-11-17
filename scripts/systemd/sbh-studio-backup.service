@@ -1,0 +1,40 @@
+# Logical backup of the production (Neon) database — a second copy that lives
+# outside Neon's control plane, so it survives anything that happens inside it.
+#
+# A systemd USER unit (not system): it needs the repo checkout and ~/backups,
+# both of which belong to the owner's account, and it needs no root.
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/systemd/sbh-studio-backup.* ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now sbh-studio-backup.timer
+#
+# Run once by hand (also the way to verify it works at all):
+#   systemctl --user start sbh-studio-backup.service
+#   journalctl --user -u sbh-studio-backup.service -n 30
+#
+# NOTE: a user unit normally stops when the last session for the user ends. For
+# a timer that fires while logged out:  sudo loginctl enable-linger $USER
+
+[Unit]
+Description=Dump the saadbhatti.studio production database to ~/backups
+Documentation=file://%h/Projects/saadbhatti.studio/docs/operations.md
+# Pointless without a network; this makes a boot-time catch-up run wait for one
+# rather than fail and count as "ran".
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Projects/saadbhatti.studio
+# Credentials are read by the script from .env.neon.local (git-ignored) rather
+# than being named here: a systemd unit is world-readable, and this file is
+# committed to a PUBLIC repository.
+ExecStart=/usr/bin/env node scripts/backup-neon.mjs
+# A dump of this database takes seconds. If it has not finished in 10 minutes
+# something is wrong (hung connection), and hanging forever would silently
+# block every later run.
+TimeoutStartSec=10min
+Nice=10
+IOSchedulingClass=idle

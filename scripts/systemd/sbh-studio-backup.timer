@@ -1,0 +1,17 @@
+# Daily trigger for sbh-studio-backup.service. See that file for install steps.
+
+[Unit]
+Description=Daily saadbhatti.studio database backup
+
+[Timer]
+# Daily, with a window rather than a fixed instant so a wake-from-sleep does
+# not stampede. Persistent=true is the important line on a laptop: if the
+# machine was off at the scheduled time, the run happens at the next boot
+# instead of being skipped — without it, a timer on a machine that sleeps
+# overnight simply never fires.
+OnCalendar=daily
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

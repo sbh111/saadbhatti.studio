@@ -85,11 +85,38 @@ responsive `srcset`, lazy loading, and a blur-up placeholder. Originals stay off
 Private inquiries ("comment log"), likes, the event-streaming toggle, rate-limit
 counters, and CLIP search vectors are all stored in Postgres via Prisma — Neon in
 production, a local Docker Postgres for development (see
-[docs/schema-design.md](docs/schema-design.md) for the five tables). **DB URLs
+[docs/schema-design.md](docs/schema-design.md) for the six tables). **DB URLs
 live in `.env`** (not `.env.local`) because the Prisma CLI reads only `.env`;
 Next.js reads both. Copy `.env.example` to `.env` (the committed local Docker
 URLs work as-is) and add `IP_HASH_SALT` to `.env.local` (see
 `.env.local.example`).
+
+> **`.env` is local-only. Production credentials must never go in it.** That file
+> is loaded implicitly by both the Prisma CLI and Next, so whatever is in it is
+> what a careless command reaches — on 2026-11-17 it held the Neon URLs and a
+> routine `prisma migrate diff --shadow-database-url "$DIRECT_URL"` reset the
+> production database. Neon credentials belong in `.env.neon.local`, which is
+> git-ignored and loaded automatically by nothing, and are used deliberately via
+> `scripts/with-neon-db.mjs`. Full account: [docs/operations.md](docs/operations.md) #3.1.
+
+Prefer these over raw Prisma commands — they refuse to run unless both
+`DATABASE_URL` and `DIRECT_URL` point at a local host:
+
+```bash
+npm run db:migrate    # assert-local-db.mjs, then prisma migrate dev
+```
+
+```bash
+npm run db:reset      # assert-local-db.mjs, then prisma migrate reset
+```
+
+```bash
+npm run db:diff       # read-only drift check; safe against ANY database
+```
+
+```bash
+npm run db:check      # just the guard: which database am I pointed at?
+```
 
 The local `db` image is `pgvector/pgvector:pg16`, not plain `postgres:16-alpine` —
 `prisma/migrations` includes `CREATE EXTENSION IF NOT EXISTS vector` (the CLIP search
@@ -117,13 +144,24 @@ lazily, so `next build` never needs a running database.
 ### Production migrations (manual)
 
 Migrations are **not** run in the Vercel build (content redeploys stay decoupled from DB
-availability). After adding a migration, apply it to Neon by hand with the Neon URLs as
-real env vars (real env beats `.env` in Prisma's precedence — no dotenv-cli needed):
+availability). After adding a migration, apply it to Neon through the wrapper, which reads
+`.env.neon.local`, tells you which host it is about to touch, and makes you type that host
+back before it runs anything:
 
-```powershell
-$env:DATABASE_URL="<neon pooled ...?sslmode=require&pgbouncer=true>"
-$env:DIRECT_URL="<neon direct ...?sslmode=require>"
-npx prisma migrate deploy
+```bash
+scripts/with-neon-db.mjs npx prisma migrate deploy
+```
+
+It passes the credentials to the child process through its environment (real env beats `.env`
+in Prisma's precedence), so nothing has to be exported into your shell — where it would then
+be in reach of every *later* command in that session, which is precisely how the 2026-11-17
+incident happened. The wrapper unconditionally refuses `--shadow-database-url`,
+`migrate reset`, `db push` and `migrate dev`, whatever you type at the prompt.
+
+Check what is applied without changing anything:
+
+```bash
+scripts/with-neon-db.mjs npx prisma migrate status
 ```
 
 ## Email notifications (Resend)
@@ -224,8 +262,31 @@ deploy never depends on the database being up), and `npm run verify:routes` asse
 static/dynamic split in CI. See [docs/architecture.md §13](docs/architecture.md) invariant 2.
 
 **Back up the database.** Artwork survives a lost database because Cloudinary holds the real copy;
-blog posts do not. `scripts/backup-db.sh` has never been run — do a dump and a restore drill
-before you write anything you would mind losing.
+blog posts do not. There are two lines of defence and they cover different failures:
+
+- **Neon instant restore** — always on, no setup, but time-bounded (~6 hours on Free). This is
+  what recovered the 2026-11-17 reset; see [docs/operations.md](docs/operations.md) #3.1.
+- **A nightly `pg_dump` to `~/backups`** — unbounded retention, outside Neon entirely, but it
+  only fires when this machine is on. Install the timer:
+
+```bash
+mkdir -p ~/.config/systemd/user && cp scripts/systemd/sbh-studio-backup.* ~/.config/systemd/user/
+```
+
+```bash
+systemctl --user daemon-reload && systemctl --user enable --now sbh-studio-backup.timer
+```
+
+```bash
+sudo loginctl enable-linger $USER
+```
+
+The last one lets the timer fire while logged out. Verify with
+`systemctl --user start sbh-studio-backup.service` then
+`journalctl --user -u sbh-studio-backup.service -n 30`. Deliberately **not** a GitHub Actions
+workflow: this repository is public, and a workflow artifact containing the `inquiries` table
+would publish visitors' names, emails and messages. A restore drill has still never been
+run — an untested backup is a hypothesis.
 
 ## Deploy
 
