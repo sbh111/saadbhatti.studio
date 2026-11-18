@@ -117,8 +117,37 @@ export const MIN_SCORE = 0.18;
 // each per-IP limit misses. Set far above real inquiry volume so it only ever
 // trips under attack; over the cap the inquiry is still stored, only the email is
 // skipped (and flagged in the comment log for manual resend).
+// NOTE: 200 is ABOVE Resend's free-plan ceiling of 100 transactional emails per
+// day (verified 2026-11-18), so this cap cannot currently do its job — under a
+// flood, roughly a hundred inquiries would be stored with emailStatus = FAILED
+// and Resend's rejection text in emailError. Lowering it is tracked separately
+// from the blog work, because it is a live defect rather than a new-feature
+// concern, and because a second sender (subscriber confirmations, Phase 3) will
+// have to share the same 100/day budget.
 export const DAILY_EMAIL_CAP = 200;
 export const DAY_MS = 24 * 60 * 60 * 1000;
+
+// ─── Blog engagement (Phase 2) ──────────────────────────────────────────────
+
+// Blog likes. Mirrors the artwork LIKE_MAX exactly — the same gesture, and a
+// shared POST+DELETE budget so a toggle-flood cannot get two budgets.
+export const BLOG_LIKE_MAX = 30;
+export const BLOG_LIKE_WINDOW_MS = 60_000;
+
+// The public engagement/comment READS. Present not because a read is expensive
+// but because the query string is part of the CDN cache key: `?slugs=a&_=rand`
+// busts it and turns every request into a Postgres query, which would make the
+// `s-maxage` on those routes advisory rather than protective.
+export const BLOG_READ_MAX = 120;
+export const BLOG_READ_WINDOW_MS = 60_000;
+
+// Site-wide ceiling on stored comments, keyed "__global__" rather than per-IP.
+// The per-IP limit (lib/commentLimits.ts) is the real first line of defence;
+// this bounds a distributed, IP-rotating flood that the per-IP limit cannot
+// see. Over the cap the route returns `busy()` and writes nothing — unlike the
+// email cap, where the row is kept and only the side effect is skipped.
+export const BLOG_COMMENT_GLOBAL_MAX = 200;
+export const BLOG_COMMENT_GLOBAL_WINDOW_MS = 60 * 60 * 1000;
 
 // --- Stale-window sweep (tech debt 2.1) ----------------------------------
 //

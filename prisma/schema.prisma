@@ -42,6 +42,15 @@ enum PostStatus {
   ARCHIVED
 }
 
+/// held (scored and withheld, or not yet scored) → published (publicly
+/// visible) → spam (kept, not shown, so Akismet can be given feedback and so a
+/// false positive is recoverable). Nothing is ever hard-deleted by the filter.
+enum CommentStatus {
+  PUBLISHED
+  HELD
+  SPAM
+}
+
 model Inquiry {
   id              String        @id @default(cuid())
   artworkPublicId String        @db.VarChar(255) // ONLY stable artwork key
@@ -69,7 +78,11 @@ model Inquiry {
 // (tech debt 2.1). `rate_windows_windowStart_idx` (below) is what makes that
 // sweep's own `WHERE "windowStart" < $1` selective instead of a sequential scan.
 model RateWindow {
-  bucket      String   @db.VarChar(64) // "like" | "events" | "search" | "search_global" | "inquiry" | "inquiry_email"
+  // "like" | "events" | "search" | "search_global" | "inquiry" | "inquiry_email"
+  // | "blog_like" | "blog_comment" | "blog_engagement"
+  // Kept in sync by hand with the constants in lib/rateLimit.ts — this list is
+  // documentation, not a constraint, and it has drifted before.
+  bucket      String   @db.VarChar(64)
   ipHash      String   @db.VarChar(64) // salted IP hash, or a global pseudo-key
   windowStart DateTime
   count       Int      @default(0)
@@ -186,6 +199,15 @@ model Post {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// Phase 2 children. Declaring these adds no columns, but it is NOT
+  /// optional: with Prisma's default `relationMode = "foreignKeys"`,
+  /// schema.prisma is the source of truth, so a foreign key that exists only
+  /// in migration SQL registers as drift and the next `prisma migrate dev`
+  /// tries to drop it (docs/schema-design.md §1). Queries stay explicit —
+  /// nothing has to traverse these navigations for them to earn their place.
+  likes    PostLike[]
+  comments PostComment[]
+
   /// Serves the one hot public query — the index's
   /// `WHERE status = 'PUBLISHED' ORDER BY "publishedAt" DESC`. `status` leads
   /// because it is always an equality predicate. The admin list
@@ -194,4 +216,92 @@ model Post {
   /// admin likes aggregate.
   @@index([status, publishedAt(sort: Desc)])
   @@map("posts")
+}
+
+// ─── Blog engagement (Phase 2) ──────────────────────────────────────────────
+// The first tables in this schema with real foreign keys. Every other table
+// references artwork by Cloudinary public_id because the parent lives in
+// another system; `posts` is a real row HERE, so the "parent lives elsewhere"
+// reasoning behind the no-FK rule simply does not apply (docs/schema-design.md
+// §1). ON DELETE CASCADE means `deletePostAction` stays a single delete, and a
+// hand-written `DELETE FROM posts` in psql cleans up after itself instead of
+// silently orphaning rows.
+
+/// One visitor's like on one post. The artwork twin is `Like` above; the only
+/// structural difference is the foreign key.
+model PostLike {
+  id     String @id @default(cuid())
+  postId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  /// sha256(ip + IP_HASH_SALT) — the same salted pseudonym `likes` and
+  /// `inquiries` use. Never a raw address (architecture.md invariant 6).
+  ipHash    String   @db.VarChar(64)
+  createdAt DateTime @default(now())
+
+  /// The dedup mechanism, not a hint: a second like from the same visitor
+  /// raises P2002, which the route turns into the same 204 a first like gets.
+  /// Idempotency is enforced by the database rather than by a read-then-write
+  /// race in the application.
+  ///
+  /// It is also the index the count query AND the cascade use, because
+  /// `postId` leads it — so do NOT add a standalone `postId` index.
+  /// `likes_artworkPublicId_idx` was exactly that redundancy and migration 6
+  /// (`drop_unused_indexes`) removed it.
+  @@unique([postId, ipHash])
+  @@map("post_likes")
+}
+
+/// A visitor comment. Name only — there is deliberately no email column, so
+/// there is nothing sensitive here to leak or to honour a deletion request
+/// over. The cost is that Akismet scores with less signal; see lib/akismet.ts.
+model PostComment {
+  id     String @id @default(cuid())
+  postId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  authorName String @db.VarChar(80)
+  body       String @db.VarChar(2000)
+
+  /// Defaults to HELD **in the database**, which is the real guarantee: no
+  /// code path, no bug, and no hand-written INSERT can land a comment publicly
+  /// without it having been scored first. Promotion to PUBLISHED happens only
+  /// after the filter has run.
+  status CommentStatus @default(HELD)
+
+  /// The owner's own replies, auto-published with a badge. Comments stay flat:
+  /// an owner reply covers the only threading case that matters on a blog this
+  /// size, and a parentId would buy nesting nobody asked for.
+  isOwner Boolean @default(false)
+
+  /// Which heuristic held or binned it, for the moderation queue. NEVER shown
+  /// publicly — it would tell a spammer exactly which rule to route around.
+  spamReason String? @db.VarChar(200)
+
+  ipHash    String   @db.VarChar(64)
+  createdAt DateTime @default(now())
+
+  /// Deliberately NO `userAgent` column. Its only plausible reader would be
+  /// Akismet's submit-spam / submit-ham feedback endpoints — and those want the
+  /// original request's raw IP above all, which invariant 6 forbids storing.
+  /// Feeding Akismet without it trains it badly, so the feedback call is out of
+  /// scope, and with it the column. Storing a visitor's user agent to supply a
+  /// request this app does not make would be collecting PII-adjacent data for
+  /// no reader at all.
+
+  /// The one hot public query: `WHERE "postId" = $1 AND status = 'PUBLISHED'
+  /// ORDER BY "createdAt" ASC`. ASCENDING, unlike every other index in this
+  /// schema: a conversation reads oldest-first, and the declared order should
+  /// match the query rather than lean on a backward scan. `postId` leads it, so
+  /// it serves the cascade's child lookup too — Postgres does not index the
+  /// referencing side of a foreign key for you, and without a postId-leading
+  /// index every post delete would sequentially scan this table.
+  ///
+  /// No index on `status` alone. The moderation queue's `WHERE status = 'HELD'`
+  /// is a deliberate scan, the same call §4 already records for
+  /// `inquiries.emailStatus` — the admin reads a page and filters in
+  /// JavaScript, and an index must serve a real access pattern rather than
+  /// exist in case one appears.
+  @@index([postId, status, createdAt])
+  @@map("post_comments")
 }
