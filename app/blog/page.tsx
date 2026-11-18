@@ -30,9 +30,12 @@ export default async function BlogIndex() {
       : `${posts.length} posts`;
 
   return (
-    // Centred to the same 680px measure as a post (components/PostArticle.tsx),
-    // so moving from the index into a post does not shift the column.
-    <div className="mx-auto max-w-[680px] pb-10">
+    // Left-aligned and full-width, identical to app/art/page.tsx — this is an
+    // index, and it belongs with the site's other indexes rather than with the
+    // thing it links to. Only the POST is centred to a reading measure
+    // (components/PostArticle.tsx), because that is prose and this is a list.
+    // The asymmetry is deliberate; don't "fix" it into matching.
+    <div className="pb-10">
       <header className="px-[30px] pb-5 pt-[34px]">
         <h1 className="font-pixel text-xl leading-relaxed text-ink">blog</h1>
         <p className="mt-1.5 text-[15px] text-ink-muted">{label}</p>
