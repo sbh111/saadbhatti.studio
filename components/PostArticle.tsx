@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { renderMarkdown } from "@/lib/markdown";
 import { formatPostDate } from "@/lib/postDate";
 import type { PostCover } from "@/lib/posts";
@@ -33,6 +34,7 @@ export default function PostArticle({
   body,
   readingMinutes,
   cover,
+  backHref,
 }: {
   title: string;
   /** ISO 8601, or null for a draft that has never been published. */
@@ -40,6 +42,21 @@ export default function PostArticle({
   body: string;
   readingMinutes: number;
   cover: PostCover | null;
+  /**
+   * Where "all posts" goes, or omitted for no back link.
+   *
+   * A post needs one in a way a collection page does not: `lib/nav.ts` makes
+   * the blog's nav node deliberately childless (listing posts there would put
+   * a Postgres read in the root layout and make the whole site dynamic), so
+   * `/blog/<slug>` has no ancestor in the sidebar tree to climb. The catalog's
+   * deeper pages are all in that tree, which is why none of them carries one.
+   *
+   * A prop rather than a hardcoded link because the admin preview renders this
+   * same component and already has its own "back to editor" bar — sending the
+   * owner to the public index from a draft preview would be wrong. It passes
+   * nothing, so it gets nothing.
+   */
+  backHref?: string;
 }) {
   const html = renderMarkdown(body);
   const meta = [
@@ -53,6 +70,16 @@ export default function PostArticle({
   return (
     <article className="mx-auto max-w-[680px] pb-16">
       <header className="px-[30px] pb-5 pt-[34px]">
+        {/* Inside the header so one place owns the spacing above the title —
+            putting it in the page would stack a second pt-[34px] on top. */}
+        {backHref && (
+          <Link
+            href={backHref}
+            className="mb-3 inline-block text-[13px] text-ink-faint hover:text-steel"
+          >
+            ← all posts
+          </Link>
+        )}
         <h1 className="font-pixel text-xl leading-relaxed text-ink">{title}</h1>
         <p className="mt-1.5 text-[13px] text-ink-faint">{meta.join(" · ")}</p>
       </header>

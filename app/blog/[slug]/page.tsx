@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { content } from "@/lib/content";
 import { getPublishedPost } from "@/lib/posts";
+import { blogHref } from "@/lib/urls";
 import PostArticle from "@/components/PostArticle";
 
 /**
@@ -69,6 +70,7 @@ export default async function PostView({
       body={post.body}
       readingMinutes={post.readingMinutes}
       cover={post.cover}
+      backHref={blogHref()}
     />
   );
 }
