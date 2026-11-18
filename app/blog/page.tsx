@@ -87,6 +87,8 @@ export default async function BlogIndex() {
                   {formatPostDate(post.publishedAt)}
                   {post.readingMinutes > 0 &&
                     ` · ${post.readingMinutes} min read`}
+                  {post.commentCount > 0 &&
+                    ` · ${post.commentCount} comment${post.commentCount === 1 ? "" : "s"}`}
                 </div>
                 <p className="mt-1.5 text-[15px] text-ink-muted">
                   {post.excerpt}

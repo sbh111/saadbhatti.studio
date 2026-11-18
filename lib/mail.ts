@@ -55,7 +55,7 @@ export async function sendInquiryNotification(
     data.collectionSlug,
     data.artworkSlug
   );
-  const logUrl = `${SITE_URL}/admin/comments`;
+  const logUrl = `${SITE_URL}/admin/inquiries`;
 
   const subject = `New inquiry: ${data.artworkTitle} — ${data.name}`;
 

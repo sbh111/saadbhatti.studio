@@ -5,7 +5,7 @@ import PostArticle from "@/components/PostArticle";
 /**
  * PostArticle is a server component with no state and no data access, so it is
  * called as a plain function and its returned element tree is inspected —
- * the same approach test/admin/comments.test.ts takes, and the reason this
+ * the same approach test/admin/inquiries.test.ts takes, and the reason this
  * repo needs no jsdom or RTL.
  *
  * The property worth pinning here is the ASYMMETRY of the back link: the

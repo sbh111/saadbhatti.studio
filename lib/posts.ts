@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
-import { PostStatus } from "@prisma/client";
+import { CommentStatus, PostStatus } from "@prisma/client";
 import {
   BLOG_CACHE_TAG,
   BLOG_REVALIDATE_SECONDS,
@@ -75,6 +75,22 @@ export interface PostCard {
    */
   readingMinutes: number;
   cover: PostCover | null;
+  /**
+   * Published comments only. Derived, like reading time — and read on the
+   * SERVER here rather than client-side as the like count is, because a
+   * comment count is not per-visitor data and so does not need the treatment
+   * invariant 2(c) prescribes.
+   *
+   * It therefore inherits the index's hourly cache: a new comment shows up in
+   * this number within the revalidation window, or immediately if the owner
+   * edits the post. That staleness is fine for a teaser on a list — the post
+   * page itself counts the comments it has actually loaded.
+   *
+   * Like counts are deliberately NOT here. They would have to be fetched
+   * client-side (the "have I liked this" state is per-visitor and shares the
+   * request), and that is the post page's job.
+   */
+  commentCount: number;
 }
 
 /** One public post. `body` is Markdown as of Phase 1 (see lib/markdown.ts). */
@@ -127,6 +143,11 @@ const readPublishedPosts = unstable_cache(
         coverAlt: true,
         coverWidth: true,
         coverHeight: true,
+        // One filtered relation count rather than a second query. Verified
+        // against the real database — filtered `_count` is supported in the
+        // installed Prisma 6.19 — and it costs one more aggregate per
+        // revalidation window, not per request.
+        _count: { select: { comments: { where: { status: CommentStatus.PUBLISHED } } } },
         // Read, used to count words, and then DISCARDED — the body never
         // reaches the cached value or the index's HTML.
         //
@@ -144,7 +165,7 @@ const readPublishedPosts = unstable_cache(
         body: true,
       },
     });
-    return rows.flatMap(({ body, ...row }) =>
+    return rows.flatMap(({ body, _count, ...row }) =>
       row.publishedAt
         ? [
             {
@@ -154,6 +175,7 @@ const readPublishedPosts = unstable_cache(
               publishedAt: row.publishedAt.toISOString(),
               readingMinutes: readingMinutes(body),
               cover: coverFrom(row),
+              commentCount: _count.comments,
             },
           ]
         : []
@@ -218,6 +240,10 @@ const readPublishedPost = (slug: string) =>
         publishedAt: row.publishedAt.toISOString(),
         readingMinutes: readingMinutes(row.body),
         cover: coverFrom(row),
+        // Not used by the post page — CommentThread counts what it loaded, so
+        // the number a reader sees is never stale. Present only because
+        // PostDetail extends PostCard.
+        commentCount: 0,
       };
     },
     ["blog:post", slug],

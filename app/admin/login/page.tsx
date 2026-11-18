@@ -16,7 +16,7 @@ export default async function AdminLoginPage({
 }) {
   // /admin has no page of its own (see lib/nav.ts) — send an already-logged-in
   // admin to the comment log, the admin's main page, instead of a bare 404.
-  if (await isAdmin()) redirect("/admin/comments");
+  if (await isAdmin()) redirect("/admin/inquiries");
   const { error } = await searchParams;
 
   const inputClasses =

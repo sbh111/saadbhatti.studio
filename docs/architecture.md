@@ -577,9 +577,25 @@ Missing-credential errors are raised deliberately with instructions
       returning nothing is what keeps the database out of the build). A static
       route achieves it by catching the failure and degrading
       (`listPublishedPosts`).
-   c. Per-visitor data never enters the render. Phase 0 has none; when likes
-      and comment counts arrive they are fetched client-side from
-      `/api/blog/*`, the way `AdminProvider` fetches `/api/admin/session`.
+   c. Per-visitor data never enters the render. Likes and comments satisfy
+      this by being fetched client-side from `/api/blog/*`, the way
+      `AdminProvider` fetches `/api/admin/session`.
+
+      Worth knowing *why* that is also the mechanically right answer, not
+      merely the compliant one. A cached server read would have been legal
+      under (a) and (b) — but refreshing a count after a like would then need
+      `revalidateTag`, which means **one visitor's click restages the HTML of
+      `/blog` and every post page**: a publicly reachable
+      one-request-to-N-regenerations amplifier, behind a rate limiter that
+      fails open. And the obvious mitigation, a shorter revalidate on the
+      count read, is forbidden by the clamping note in `lib/constants.ts`.
+
+      So counts live in `/api/blog/engagement`, cached at the CDN by that
+      route's own `Cache-Control` and never in Next's data cache. That is only
+      possible because the response carries **no** per-visitor data: whether
+      *you* liked something stays in `localStorage`, exactly as
+      `components/LikeButton.tsx` has always done it. Returning it would be
+      more honest across devices and would make every request a cache miss.
 
    The build must stay database-independent. `.github/workflows/ci.yml` points
    `DATABASE_URL` at an unreachable placeholder specifically to keep this
@@ -667,6 +683,22 @@ Missing-credential errors are raised deliberately with instructions
     "every post folder belongs to a real post" true, and is where the slug in
     the folder name comes from (never the request body, which would let a
     caller name the signed folder).
+16. **No comment path ever calls `updateTag` or `revalidateTag`.** Visitor
+    comments are fetched client-side and cached only at the CDN
+    (`lib/comments.ts`), so nothing a visitor writes enters prerendered HTML
+    and there is nothing to invalidate. Its absence will read as an omission to
+    anyone who met `revalidateBlog` in `app/admin/blog/actions.ts` first — it
+    is not. Adding one would reintroduce the amplifier invariant 2(c)
+    describes, and from a route handler `updateTag` throws outright (it is
+    Server-Action-only). The admin moderation actions revalidate their own page
+    and nothing else.
+17. **A comment body renders as an escaped React text node.** Never through
+    `renderMarkdown`, never through `dangerouslySetInnerHTML` (invariant 13
+    already says so), and **never auto-linkified** — which would both widen the
+    surface invariant 13 protects and actively reward link spam. The same rule
+    applies in the moderation queue, where a held comment's `spamReason` is
+    visible to the owner and to nobody else: telling a commenter which rule
+    they tripped tells a spammer how to route around it.
 
 ---
 

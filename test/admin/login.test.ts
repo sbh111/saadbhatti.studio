@@ -32,7 +32,7 @@ describe("AdminLoginPage", () => {
     const target = await redirectTarget(
       AdminLoginPage({ searchParams: searchParams() })
     );
-    expect(target).toBe("/admin/comments");
+    expect(target).toBe("/admin/inquiries");
   });
 
   it("renders the login form (no redirect) for a logged-out visitor", async () => {
