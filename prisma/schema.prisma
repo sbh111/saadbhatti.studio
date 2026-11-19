@@ -42,6 +42,33 @@ enum PostStatus {
   ARCHIVED
 }
 
+/// PENDING (signed up, not yet confirmed) → CONFIRMED (double opt-in complete,
+/// mailable) → UNSUBSCRIBED. BOUNCED is declared now though nothing sets it
+/// yet: a Resend webhook would, and adding an enum value later is a migration
+/// — the same call PostStatus.ARCHIVED made in Phase 0.
+enum SubscriberStatus {
+  PENDING
+  CONFIRMED
+  UNSUBSCRIBED
+  BOUNCED
+}
+
+/// Outcome of the subscriber broadcast for one post. NOT_SENT is the only
+/// state a publish may claim from, and the claim is a CONDITIONAL UPDATE
+/// rather than a read-then-write, so two concurrent publishes cannot both win.
+///
+/// SENDING exists because claiming and sending are separate steps: a function
+/// that dies between them leaves SENDING, which the owner can see and retry.
+/// FAILED and SKIPPED are retryable BY HAND ONLY — retrying automatically on
+/// the next publish is exactly the double send this guard exists to prevent.
+enum NotifyStatus {
+  NOT_SENT
+  SENDING
+  SENT
+  SKIPPED
+  FAILED
+}
+
 /// held (scored and withheld, or not yet scored) → published (publicly
 /// visible) → spam (kept, not shown, so Akismet can be given feedback and so a
 /// false positive is recoverable). Nothing is ever hard-deleted by the filter.
@@ -199,6 +226,38 @@ model Post {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  /// ── Subscriber notification (Phase 3) ──────────────────────────────────
+  /// Publishing emails confirmed subscribers automatically, which was chosen
+  /// knowing that unpublish/re-publish could double-send. These four columns
+  /// are what make that impossible rather than merely unlikely.
+  ///
+  /// `notifyStatus` is the ONE-SHOT GUARD: a publish claims the send with a
+  /// conditional `updateMany({ where: { notifyStatus: NOT_SENT } })` and
+  /// proceeds only if exactly one row changed. Unpublish, archive and restore
+  /// deliberately leave it alone, so a re-publish finds it already claimed and
+  /// sends nothing.
+  ///
+  /// A bare `notifiedAt` timestamp would have been enough for "at most once",
+  /// but it would make the one-shot SILENT: a transient Resend 500 would set
+  /// the timestamp, fail, and permanently mute that post with nothing
+  /// recording why. The status column is what turns "at most once" into "at
+  /// most once, and you can see which outcome you got" — the argument
+  /// `inquiries.emailStatus` already won here.
+  notifyStatus NotifyStatus @default(NOT_SENT)
+
+  /// When the send was CLAIMED, not when mail landed. Nothing reads it as a
+  /// delivery time.
+  notifiedAt DateTime?
+
+  /// Resend's broadcast id, stored immediately after creation. Closes the one
+  /// real double-send hole: Resend's broadcast API is create-then-send, two
+  /// calls, so a hand retry without this would create a SECOND broadcast.
+  notifyBroadcastId String? @db.VarChar(64)
+
+  /// Why it failed or was skipped, truncated to the column width — the same
+  /// shape and purpose as `inquiries.emailError`.
+  notifyError String? @db.VarChar(500)
+
   /// Phase 2 children. Declaring these adds no columns, but it is NOT
   /// optional: with Prisma's default `relationMode = "foreignKeys"`,
   /// schema.prisma is the source of truth, so a foreign key that exists only
@@ -304,4 +363,75 @@ model PostComment {
   /// exist in case one appears.
   @@index([postId, status, createdAt])
   @@map("post_comments")
+}
+
+// ─── Subscribers (Phase 3) ──────────────────────────────────────────────────
+// The first table in this schema holding an address this app will MAIL, which
+// is a different kind of responsibility from everything above it.
+//
+// Division of authority, because two systems hold overlapping facts:
+//   Postgres is authoritative for CONSENT  — does this address want mail, and
+//     when did it say so. This is the legal record of double opt-in, it
+//     survives the Resend account, and it is what scripts/backup-db.sh
+//     protects. Resend has no concept of "pending".
+//   Resend is authoritative for DELIVERABILITY — which contacts a broadcast
+//     actually reaches, the unsubscribe link in every email, bounces and
+//     complaints.
+//
+// Drift is therefore benign by construction: a broadcast can only reach Resend
+// contacts, so someone who unsubscribes via Resend's own link stops receiving
+// mail regardless of what Postgres says. Postgres is a record, not a gate.
+model Subscriber {
+  id String @id @default(cuid())
+
+  /// Lowercased and trimmed BY THE APPLICATION before it ever arrives here. A
+  /// Postgres unique index on text is case-sensitive, so without that
+  /// normalisation "A@x.com" and "a@x.com" would both be storable and both be
+  /// mailed. Width mirrors `inquiries.email`.
+  email String @unique @db.VarChar(254)
+
+  status SubscriberStatus @default(PENDING)
+
+  /// sha256 of the one-time confirmation token — never the token itself, which
+  /// exists only in the email. Same reasoning as ADMIN_PASSWORD_HASH and
+  /// ipHash: a database leak must not let the reader confirm anybody.
+  ///
+  /// UNIQUE, which makes "one live token per row" structural rather than a
+  /// property of 256 bits of randomness, and which is the index the confirm
+  /// route's only lookup uses. Nullable because confirming NULLS it — that is
+  /// what makes the link single-use — and Postgres permits many NULLs in a
+  /// unique index, so confirmed rows cost nothing here.
+  tokenHash   String?   @unique @db.VarChar(64)
+  tokenSentAt DateTime?
+
+  /// The consent record. This, with `email`, is the entire reason a Postgres
+  /// copy exists alongside Resend.
+  confirmedAt    DateTime?
+  unsubscribedAt DateTime?
+
+  /// The Resend contact this row created. The join key that makes drift
+  /// DETECTABLE: a CONFIRMED row with NULL here never made it into the
+  /// audience and will silently miss every broadcast.
+  resendContactId String? @db.VarChar(64)
+
+  /// Signup IP, salted. Write-only, as on `inquiries`.
+  ipHash    String   @db.VarChar(64)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// No index beyond the two unique constraints, and note this is the same
+  /// call made for `post_comments.status`. Sending goes through Resend's
+  /// contact list, so Postgres is never queried for "everyone confirmed"; the
+  /// only `WHERE status = …` reads are the admin list and the drift count,
+  /// both admin scans over a table the free tier caps at ~1,000 rows. `email`
+  /// and `tokenHash` being unique already covers every hot lookup: the signup
+  /// upsert, confirm, and the expired-pending sweep's bounded delete.
+  ///
+  /// Deliberately NO unsubscribe-token column. An unsubscribe link must stay
+  /// valid forever and be mintable at every broadcast, which a stored
+  /// single-use hash cannot do — it is derived as an HMAC of the id instead
+  /// (lib/subscribers.ts). The general rule worth remembering: a ONE-SHOT
+  /// credential gets a stored hash plus a timestamp; a PERMANENT capability
+  /// gets a derived HMAC and nothing at rest.
+  @@map("subscribers")
 }

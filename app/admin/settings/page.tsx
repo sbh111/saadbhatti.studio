@@ -8,10 +8,11 @@ import {
   COMMENTS_ENABLED_KEY,
   COMMENT_AUTO_PUBLISH_KEY,
   EVENT_STREAMING_KEY,
+  NOTIFY_SUBSCRIBERS_KEY,
   getBooleanSetting,
   getSetting,
 } from "@/lib/settings";
-import { setCommentSettingAction, setEventStreamingAction } from "./actions";
+import { setBlogSettingAction, setEventStreamingAction } from "./actions";
 
 export const metadata: Metadata = {
   title: `settings - ${content.site.title}`,
@@ -60,6 +61,7 @@ export default async function SettingsPage() {
   // the route does not act on.
   const commentsEnabled = await getBooleanSetting(COMMENTS_ENABLED_KEY, true);
   const autoPublish = await getBooleanSetting(COMMENT_AUTO_PUBLISH_KEY, false);
+  const notifySubscribers = await getBooleanSetting(NOTIFY_SUBSCRIBERS_KEY, true);
   const drift = await embeddingDrift();
 
   return (
@@ -111,7 +113,7 @@ export default async function SettingsPage() {
               </span>
             </div>
           </div>
-          <form action={setCommentSettingAction}>
+          <form action={setBlogSettingAction}>
             <input type="hidden" name="key" value={COMMENTS_ENABLED_KEY} />
             <input
               type="hidden"
@@ -145,7 +147,7 @@ export default async function SettingsPage() {
               </span>
             </div>
           </div>
-          <form action={setCommentSettingAction}>
+          <form action={setBlogSettingAction}>
             <input type="hidden" name="key" value={COMMENT_AUTO_PUBLISH_KEY} />
             <input type="hidden" name="to" value={autoPublish ? "off" : "on"} />
             <button
@@ -153,6 +155,45 @@ export default async function SettingsPage() {
               className="shrink-0 rounded-[2px] border border-hairline px-3 py-1.5 text-[13px] text-ink hover:border-steel hover:text-steel"
             >
               {autoPublish ? "Turn off" : "Turn on"}
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <section className="mt-4 rounded-[2px] border border-hairline bg-panel p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="text-[15px] font-medium text-ink">
+              Notify subscribers on publish
+            </div>
+            <p className="mt-1 text-[13px] leading-relaxed text-ink-muted">
+              Publishing a post emails everyone who confirmed. A post can only
+              ever notify <em>once</em>, however many times you publish it, so
+              unpublishing and re-publishing never sends twice. Turn this off
+              before publishing a typo fix, or anything subscribers should not
+              be mailed about — the post then records{" "}
+              <span className="text-ink">skipped</span> rather than silently
+              not sending.
+            </p>
+            <div className="mt-2 text-[12px] text-ink-faint">
+              Status:{" "}
+              <span className={notifySubscribers ? "text-steel" : ""}>
+                notifications {notifySubscribers ? "ON" : "OFF"}
+              </span>
+            </div>
+          </div>
+          <form action={setBlogSettingAction}>
+            <input type="hidden" name="key" value={NOTIFY_SUBSCRIBERS_KEY} />
+            <input
+              type="hidden"
+              name="to"
+              value={notifySubscribers ? "off" : "on"}
+            />
+            <button
+              type="submit"
+              className="shrink-0 rounded-[2px] border border-hairline px-3 py-1.5 text-[13px] text-ink hover:border-steel hover:text-steel"
+            >
+              {notifySubscribers ? "Turn off" : "Turn on"}
             </button>
           </form>
         </div>

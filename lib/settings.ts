@@ -34,6 +34,20 @@ export const COMMENTS_ENABLED_KEY = "blog_comments_enabled";
  */
 export const COMMENT_AUTO_PUBLISH_KEY = "blog_comment_auto_publish";
 
+/**
+ * Master switch for emailing subscribers when a post is published.
+ *
+ * Publishing notifies automatically, which was chosen knowing the risk — so
+ * there has to be a way to stop it that does not involve a deploy. Turning
+ * this off before publishing is also the intended way to ship a typo fix, or
+ * to publish something subscribers should not be mailed about: the post still
+ * records SKIPPED, so the admin list shows that nobody was mailed and why.
+ *
+ * Defaults ON, because a subscriber who confirmed and then hears nothing is a
+ * worse failure than one email too many.
+ */
+export const NOTIFY_SUBSCRIBERS_KEY = "subscriber_notifications_enabled";
+
 /** A boolean setting, defaulting to `fallback` when unset or unreadable. */
 export async function getBooleanSetting(
   key: string,

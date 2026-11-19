@@ -5,6 +5,7 @@ import { isAdmin } from "@/lib/auth";
 import {
   COMMENTS_ENABLED_KEY,
   COMMENT_AUTO_PUBLISH_KEY,
+  NOTIFY_SUBSCRIBERS_KEY,
   EVENT_STREAMING_KEY,
   invalidateStreamingCache,
   setSetting,
@@ -24,7 +25,7 @@ export async function setEventStreamingAction(formData: FormData) {
 }
 
 /**
- * Flip a blog comment setting. One action for both keys, with the key coming
+ * Flip a blog setting. One action for all three keys, with the key coming
  * from the form — but validated against an ALLOWLIST, never used as submitted.
  * A `key` field taken on trust would let any admin form write any row in the
  * generic `settings` table, which is a wider hole than this page needs.
@@ -35,9 +36,10 @@ export async function setEventStreamingAction(formData: FormData) {
 const TOGGLEABLE = new Set<string>([
   COMMENTS_ENABLED_KEY,
   COMMENT_AUTO_PUBLISH_KEY,
+  NOTIFY_SUBSCRIBERS_KEY,
 ]);
 
-export async function setCommentSettingAction(formData: FormData) {
+export async function setBlogSettingAction(formData: FormData) {
   if (!(await isAdmin())) return;
   const key = String(formData.get("key"));
   if (!TOGGLEABLE.has(key)) return;

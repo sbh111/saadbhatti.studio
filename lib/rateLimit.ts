@@ -117,14 +117,21 @@ export const MIN_SCORE = 0.18;
 // each per-IP limit misses. Set far above real inquiry volume so it only ever
 // trips under attack; over the cap the inquiry is still stored, only the email is
 // skipped (and flagged in the comment log for manual resend).
-// NOTE: 200 is ABOVE Resend's free-plan ceiling of 100 transactional emails per
-// day (verified 2026-11-18), so this cap cannot currently do its job — under a
-// flood, roughly a hundred inquiries would be stored with emailStatus = FAILED
-// and Resend's rejection text in emailError. Lowering it is tracked separately
-// from the blog work, because it is a live defect rather than a new-feature
-// concern, and because a second sender (subscriber confirmations, Phase 3) will
-// have to share the same 100/day budget.
-export const DAILY_EMAIL_CAP = 200;
+// 200 was ABOVE Resend's free-plan ceiling of 100 transactional emails per day
+// (verified 2026-11-18), so the cap could not do its job: under a flood,
+// roughly a hundred inquiries would have been stored with emailStatus = FAILED
+// and Resend's rejection text in emailError — the cap existing but never
+// biting, which is worse than no cap because it reads as protection.
+//
+// Now 60, leaving room for a SECOND transactional sender under the same 100:
+// subscriber confirmations (SUBSCRIBE_EMAIL_DAILY_CAP below). Two separate
+// buckets rather than one shared budget on purpose — a shared counter would be
+// compliant under any mix but would let a confirmation flood starve inquiry
+// notifications, and an inquiry is a lead.
+//
+//   60 inquiries + 30 confirmations = 90, with ~10 spare for the manual
+//   resends the inquiry log offers.
+export const DAILY_EMAIL_CAP = 60;
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ─── Blog engagement (Phase 2) ──────────────────────────────────────────────
@@ -148,6 +155,28 @@ export const BLOG_READ_WINDOW_MS = 60_000;
 // email cap, where the row is kept and only the side effect is skipped.
 export const BLOG_COMMENT_GLOBAL_MAX = 200;
 export const BLOG_COMMENT_GLOBAL_WINDOW_MS = 60 * 60 * 1000;
+
+// ─── Subscriptions (Phase 3) ────────────────────────────────────────────────
+
+// Per-IP signup attempts. Deliberately tight: a confirmation email goes to an
+// address the submitter does not have to own, so this endpoint is an abuse
+// vector pointed at THIRD PARTIES, not just at this site. Three an hour is
+// generous for a human and useless for anyone mailbombing a stranger.
+export const SUBSCRIBE_MAX = 3;
+export const SUBSCRIBE_WINDOW_MS = 60 * 60 * 1000;
+
+// Site-wide daily ceiling on confirmation emails, keyed "__global__". Shares
+// Resend's free 100/day with DAILY_EMAIL_CAP above — see the arithmetic there.
+// Over the cap the row is still written and only the send is skipped, matching
+// how the inquiry cap behaves: a subscriber who never gets their confirmation
+// can retry after the cooldown.
+export const SUBSCRIBE_EMAIL_DAILY_CAP = 30;
+
+// How long a confirmation link stays valid, and how long before the same
+// address may request another. The cooldown is what stops the endpoint being
+// used to send someone the same mail repeatedly.
+export const SUBSCRIBE_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const SUBSCRIBE_RESEND_COOLDOWN_MS = 15 * 60 * 1000;
 
 // --- Stale-window sweep (tech debt 2.1) ----------------------------------
 //

@@ -699,6 +699,24 @@ Missing-credential errors are raised deliberately with instructions
     applies in the moderation queue, where a held comment's `spamReason` is
     visible to the owner and to nobody else: telling a commenter which rule
     they tripped tells a spammer how to route around it.
+18. **A post notifies subscribers at most once, ever.** The guard is a
+    CONDITIONAL update — `updateMany({ where: { notifyStatus: NOT_SENT } })`
+    checked for `count === 1` — never a read-then-write, because two
+    concurrent publishes would both read NOT_SENT and both proceed. Unpublish,
+    archive and restore deliberately do NOT reset it, so a re-publish finds the
+    send already claimed. `notifyStatus` rather than a bare `notifiedAt`
+    because a timestamp alone makes the one-shot silent: a transient Resend 500
+    would set it, fail, and mute that post forever with nothing recording why.
+    Verified against Postgres, concurrency included, not just unit-tested.
+19. **`/api/blog/subscribe` answers an identical 200 on every branch.** New,
+    pending, within cooldown, already confirmed, resubscribing, honeypot
+    tripped, and database down all return `{ok:true}` byte for byte, and the
+    send happens in `after()` so response timing does not vary either.
+    Anything that distinguishes them — a 201 for new addresses, a 409 for
+    known ones, an "already subscribed" message — makes the endpoint an
+    **email-existence oracle**, a way for anyone to test whether a given
+    person subscribes. The signup form preserves this: one success state, and
+    it treats a failed request as success too.
 
 ---
 

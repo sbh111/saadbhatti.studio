@@ -284,6 +284,51 @@ Rules worth knowing:
   no longer literal. Phase 0 shipped with no published posts, so in practice this affects
   nothing — but it is the reason the switch happened early.
 
+## Subscribing
+
+Readers can get an email when a new post goes up. The form is under the blog index.
+
+**Double opt-in.** A signup stores a pending row and emails a one-time link; only clicking it
+confirms. That stops anyone subscribing someone else's address, keeps bots out of the list, and is
+what mailbox providers expect. Links are good for seven days, and unconfirmed rows are swept
+automatically.
+
+**Publishing notifies automatically — at most once per post, ever.** The guard is a conditional
+database update, so unpublishing and re-publishing cannot send twice, and neither can a
+double-clicked button or two concurrent requests. Archive and restore do not reset it either. A
+post's outcome is visible in the admin list: `sent`, `skipped` (with a reason) or `failed`.
+
+Turn **notify subscribers** off at `/admin/settings` before publishing a typo fix, or anything
+subscribers should not be mailed about — the post then records `skipped` rather than silently not
+sending.
+
+**Where the data lives.** Postgres owns *consent* — who confirmed, and when. That is the record
+`scripts/backup-db.sh` protects, and it outlives the Resend account. Resend owns *deliverability* —
+which contacts a broadcast reaches, bounces, and the unsubscribe link in each one. `/admin/subscribers`
+shows the drift between them, and every publish repairs the dangerous direction (a confirmed person
+missing from the segment) before it sends.
+
+> **Two unsubscribe mechanisms, deliberately.** A broadcast is one message for many recipients, so
+> it cannot carry a per-person link — it uses Resend's own placeholder, and those unsubscribes
+> update Resend rather than Postgres. That is safe, because a broadcast only ever reaches Resend
+> contacts. The confirmation email carries *our* HMAC link instead, which is Postgres-authoritative
+> and has to work before any Resend contact exists.
+
+**Setup before this works in production**, none of which the build will catch:
+
+1. `SUBSCRIBE_TOKEN_SECRET` — **required**, the app refuses to boot without it. Generate with
+   `openssl rand -base64 32`. Note `instrumentation.ts` asserts at *startup*, not build time, so CI
+   stays green while a deploy would fail on every request.
+2. Create a **segment** in Resend (not an audience — Resend migrated, and the SDK marks `audienceId`
+   deprecated) and set `RESEND_SEGMENT_ID`.
+3. Set `BLOG_NOTIFY_FROM`, deliberately separate from `INQUIRY_NOTIFY_FROM` so a newsletter
+   complaint cannot hurt inquiry delivery.
+4. Send one broadcast to a segment containing only your own address first.
+
+Costs nothing at this scale: broadcasts are metered by contacts (1,000 free), not emails, and do
+not touch the transactional quota. Confirmations do — they share Resend's free 100/day with inquiry
+notifications, which is why the inquiry cap is 60 and the confirmation cap 30.
+
 ## Comments, likes and sharing
 
 Every published post carries a like control, a share row and a comment thread. All three are

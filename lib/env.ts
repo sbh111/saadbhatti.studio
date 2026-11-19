@@ -35,6 +35,13 @@ export const REQUIRED_ENV_VARS = [
   "SESSION_SECRET", // lib/auth.ts sessionOptions() — the admin session cookie
   "ADMIN_USERNAME", // lib/auth.ts verifyCredentials() — admin login
   "ADMIN_PASSWORD_HASH",
+  // lib/subscribers.ts — mints and verifies the unsubscribe MAC. The only new
+  // integration secret that does NOT degrade safely: no Resend key means mail
+  // is skipped, no Akismet key means comments wait, but an unsubscribe link
+  // that cannot be minted is mail going out with a dead link in it. That is a
+  // compliance failure rather than a degraded feature, so it fails at boot
+  // instead of being discovered by the first person trying to leave.
+  "SUBSCRIBE_TOKEN_SECRET",
 ] as const;
 
 /**

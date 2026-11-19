@@ -41,6 +41,14 @@ const MUST_BE_PRERENDERED = [
   "/art/[medium]/[collection]",
   "/blog",
   "/blog/[slug]",
+  // The three subscription outcome pages. They mutate nothing, read nothing
+  // per request, and carry no searchParams — the outcome is which page you
+  // land on. Listed here so that staying static is asserted rather than
+  // assumed: adding a `searchParams` prop to any of them would flip it to
+  // dynamic and this is what would catch it.
+  "/subscribe/confirmed",
+  "/subscribe/link-expired",
+  "/subscribe/unsubscribed",
 ];
 
 let manifest;

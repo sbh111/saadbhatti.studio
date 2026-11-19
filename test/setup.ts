@@ -28,6 +28,9 @@ const DANGEROUS_ENV_VARS = [
   // and lib/akismet.ts treats an absent key as "hold everything", which is
   // exactly the behaviour tests should see by default.
   "AKISMET_API_KEY",
+  "SUBSCRIBE_TOKEN_SECRET",
+  "RESEND_SEGMENT_ID",
+  "BLOG_NOTIFY_FROM",
 ];
 
 for (const key of DANGEROUS_ENV_VARS) {

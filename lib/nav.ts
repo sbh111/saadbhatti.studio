@@ -146,6 +146,13 @@ export function buildAdminNavNode(): NavNode {
         children: [],
       },
       {
+        id: "/admin/subscribers",
+        label: "subscribers",
+        href: "/admin/subscribers",
+        depth: 1,
+        children: [],
+      },
+      {
         id: "/admin/likes",
         label: "likes",
         href: "/admin/likes",

@@ -1,5 +1,6 @@
 "use server";
 
+import { after } from "next/server";
 import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { Prisma, PostStatus } from "@prisma/client";
@@ -16,6 +17,7 @@ import {
   isValidSlug,
   parseCoverDimension,
 } from "@/lib/blogLimits";
+import { claimNotify, notifySubscribers } from "@/lib/notifyPost";
 import { uniqueSlugFor } from "@/lib/posts";
 
 /**
@@ -187,7 +189,14 @@ export async function publishPostAction(formData: FormData) {
 
   const existing = await prisma.post.findUnique({
     where: { id },
-    select: { slug: true, excerpt: true, publishedAt: true },
+    select: {
+      slug: true,
+      title: true,
+      excerpt: true,
+      publishedAt: true,
+      coverPublicId: true,
+      notifyBroadcastId: true,
+    },
   });
   if (!existing) redirect("/admin/blog?error=missing");
 
@@ -207,6 +216,27 @@ export async function publishPostAction(formData: FormData) {
       publishedAt: existing.publishedAt ?? new Date(),
     },
   });
+
+  // ── Notify subscribers, at most once ever ───────────────────────────────
+  // The claim is a conditional UPDATE, so an unpublish/re-publish cycle, a
+  // double-clicked button and two concurrent requests all fail to claim a
+  // second time. See lib/notifyPost.ts.
+  //
+  // `after()` is registered BEFORE the redirect below, and that ordering is
+  // load-bearing: `redirect()` throws to unwind the action, so anything
+  // registered after it never runs.
+  if (await claimNotify(id)) {
+    after(() =>
+      notifySubscribers({
+        id,
+        slug: existing.slug,
+        title: existing.title,
+        excerpt: existing.excerpt,
+        coverPublicId: existing.coverPublicId,
+        notifyBroadcastId: existing.notifyBroadcastId,
+      })
+    );
+  }
 
   revalidateBlog(existing.slug);
   redirect(`/admin/blog/${id}?published=1`);

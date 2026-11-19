@@ -5,6 +5,7 @@ import { content } from "@/lib/content";
 import { formatPostDate } from "@/lib/postDate";
 import { listPublishedPosts } from "@/lib/posts";
 import { postHref } from "@/lib/urls";
+import SubscribeForm from "@/components/SubscribeForm";
 
 /**
  * The blog index — every published post, newest first.
@@ -98,6 +99,8 @@ export default async function BlogIndex() {
           </li>
         ))}
       </ul>
+
+      <SubscribeForm />
     </div>
   );
 }
