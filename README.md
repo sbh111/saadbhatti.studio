@@ -284,6 +284,98 @@ Rules worth knowing:
   no longer literal. Phase 0 shipped with no published posts, so in practice this affects
   nothing — but it is the reason the switch happened early.
 
+## Subscribing
+
+Readers can get an email when a new post goes up. The form is under the blog index.
+
+**Double opt-in.** A signup stores a pending row and emails a one-time link; only clicking it
+confirms. That stops anyone subscribing someone else's address, keeps bots out of the list, and is
+what mailbox providers expect. Links are good for seven days, and unconfirmed rows are swept
+automatically.
+
+**Publishing notifies automatically — at most once per post, ever.** The guard is a conditional
+database update, so unpublishing and re-publishing cannot send twice, and neither can a
+double-clicked button or two concurrent requests. Archive and restore do not reset it either. A
+post's outcome is visible in the admin list: `sent`, `skipped` (with a reason) or `failed`.
+
+Turn **notify subscribers** off at `/admin/settings` before publishing a typo fix, or anything
+subscribers should not be mailed about — the post then records `skipped` rather than silently not
+sending.
+
+**Where the data lives.** Postgres owns *consent* — who confirmed, and when. That is the record
+`scripts/backup-db.sh` protects, and it outlives the Resend account. Resend owns *deliverability* —
+which contacts a broadcast reaches, bounces, and the unsubscribe link in each one. `/admin/subscribers`
+shows the drift between them, and every publish repairs the dangerous direction (a confirmed person
+missing from the segment) before it sends.
+
+> **Two unsubscribe mechanisms, deliberately.** A broadcast is one message for many recipients, so
+> it cannot carry a per-person link — it uses Resend's own placeholder, and those unsubscribes
+> update Resend rather than Postgres. That is safe, because a broadcast only ever reaches Resend
+> contacts. The confirmation email carries *our* HMAC link instead, which is Postgres-authoritative
+> and has to work before any Resend contact exists.
+
+**Setup before this works in production**, none of which the build will catch:
+
+1. `SUBSCRIBE_TOKEN_SECRET` — **required**, the app refuses to boot without it. Generate with
+   `openssl rand -base64 32`. Note `instrumentation.ts` asserts at *startup*, not build time, so CI
+   stays green while a deploy would fail on every request.
+2. Create a **segment** in Resend (not an audience — Resend migrated, and the SDK marks `audienceId`
+   deprecated) and set `RESEND_SEGMENT_ID`.
+3. Set `BLOG_NOTIFY_FROM`, deliberately separate from `INQUIRY_NOTIFY_FROM` so a newsletter
+   complaint cannot hurt inquiry delivery.
+4. Send one broadcast to a segment containing only your own address first.
+
+Costs nothing at this scale: broadcasts are metered by contacts (1,000 free), not emails, and do
+not touch the transactional quota. Confirmations do — they share Resend's free 100/day with inquiry
+notifications, which is why the inquiry cap is 60 and the confirmation cap 30.
+
+## Comments, likes and sharing
+
+Every published post carries a like control, a share row and a comment thread. All three are
+composed *around* the article rather than inside it, so the admin draft preview — which renders the
+same component — is unaffected.
+
+**Comments are name-only.** No email address is collected anywhere, so there is nothing sensitive
+stored and nothing to leak. Everything arrives **held** and waits in `/admin/comments`, where
+approve / hold / spam / delete are one click each. Spam is a kept state rather than a deletion, so
+a false positive is recoverable and the filter stays tunable.
+
+Two switches on `/admin/settings`, both backed by the generic `settings` table so neither needs a
+deploy:
+
+- **comments** — accept submissions at all.
+- **auto-publish** — let a clean spam verdict publish without you. **Off deliberately.** Comments
+  carry no email, which removes the strongest signal Akismet has, so its verdicts are worth
+  *reading* for a few weeks before they are worth trusting. Until then every verdict is recorded
+  against the held comment instead.
+
+**Spam filtering runs in two passes.** Local structural heuristics first — link counts, a link in
+the name field, zero-width and bidi characters, repetition, shouting, and a submission faster than
+a human could type — then [Akismet](https://akismet.com) if `AKISMET_API_KEY` is set. It **fails
+closed**: no key, a timeout, a non-2xx or an unreadable answer all mean held, because unlike this
+codebase's other third-party calls the verdict decides public visibility. Running with no key is a
+supported mode where everything waits for you, and it is also the no-third-party option.
+
+> **Akismet is sent the commenter's raw IP address.** It cannot score without one. Nothing here
+> *stores* a raw IP (`docs/architecture.md` invariant 6) and sending is not storing, but it is an
+> outbound flow of visitor data to a third party and deserves a line in a privacy note.
+
+**Likes are one per visitor per post**, deduped by the same salted IP hash as artwork likes, with a
+public count. One consequence of that dedup now being visible: two people behind the same router
+share a like, and the same person on a second device sees an empty heart and a count that will not
+move when they click.
+
+**Sharing** covers X, Facebook, LinkedIn, Reddit, WhatsApp and email, plus copy-link and the native
+share sheet. **The sheet is how Instagram gets served** — it has no web URL for sharing an arbitrary
+link, so it cannot be a button, but every phone lists it in the sheet. Nothing is stored and no
+share count is shown: a click on an outbound link is not a share, and an inflated number is worse
+than none. Post pages carry Open Graph and Twitter card tags, which is not decoration — LinkedIn
+ignores its own title parameters and scrapes OG, so without them every share renders a grey card.
+
+**The admin "comment log" is now `/admin/inquiries`.** It has never held comments; it holds private
+inquiries, and keeping both under one name once real comments existed would have been confusing
+forever.
+
 **The public blog pages read Postgres, which no other public page does.** That is deliberate and
 fenced in: reads are cached for an hour and tagged, `next build` never issues the query (so a
 deploy never depends on the database being up), and `npm run verify:routes` asserts the

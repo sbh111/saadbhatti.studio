@@ -94,7 +94,7 @@ export function buildNavTree(mediums: CatalogMedium[]): NavNode[] {
  * Node ids to auto-expand for a pathname — every ancestor prefix of the path.
  * Node ids are hrefs (see NavNode), so a path prefix is exactly its ancestor's
  * id: `/art/photography/southwest` expands `/art` and `/art/photography`, and
- * `/admin/comments` expands `/admin` (which `buildAdminNavNode` below depends
+ * `/admin/inquiries` expands `/admin` (which `buildAdminNavNode` below depends
  * on — that parent has no href, but its id is still the path).
  *
  * Lives here rather than in NavTree so it sits next to the function that
@@ -127,10 +127,28 @@ export function buildAdminNavNode(): NavNode {
         depth: 1,
         children: [],
       },
+      // Two separate things, and until 2026-11-18 both were called "comments":
+      // this one is the private INQUIRY log and always has been, while real
+      // visitor comments on posts are new. Renaming the older one is the only
+      // way the sidebar stops lying about which is which.
       {
         id: "/admin/comments",
-        label: "comment log",
+        label: "post comments",
         href: "/admin/comments",
+        depth: 1,
+        children: [],
+      },
+      {
+        id: "/admin/inquiries",
+        label: "inquiries",
+        href: "/admin/inquiries",
+        depth: 1,
+        children: [],
+      },
+      {
+        id: "/admin/subscribers",
+        label: "subscribers",
+        href: "/admin/subscribers",
         depth: 1,
         children: [],
       },

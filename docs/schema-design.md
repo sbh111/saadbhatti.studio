@@ -343,6 +343,51 @@ No index on any of the four: they are never a query predicate. A cover is only e
 a post already located by `slug` or `id`, which is §4's rule — an index must serve a real access
 pattern rather than exist in case one appears.
 
+### Engagement: `post_likes` and `post_comments` (Phase 2)
+
+**The first foreign keys in this schema**, and the point §1's note was written for: `posts` is a
+real parent row here, so both tables carry `postId` with a real FK and `ON DELETE CASCADE`. The
+relations are declared in `schema.prisma` as well as in the migration SQL — with the default
+`relationMode = "foreignKeys"` the schema is the source of truth, and an FK that exists only in SQL
+registers as drift. Verified against the database rather than assumed: deleting a post removes its
+likes and comments, and `deletePostAction` stays a single delete rather than growing into a
+transaction.
+
+`post_likes` carries exactly one index, `@@unique([postId, ipHash])`, and it does **three** jobs:
+it *is* the dedup mechanism (a second like raises P2002, which the route converts into its normal
+success), it serves the public count because `postId` leads it, and it serves the cascade's child
+lookup — Postgres does **not** index the referencing side of a foreign key for you, so without a
+postId-leading index every post delete would sequentially scan the table. Anyone "simplifying" the
+column order would silently reintroduce that scan. Deliberately **no** standalone `postId` index:
+that is precisely the redundancy `20260830120000_drop_unused_indexes` removed from `likes`.
+
+`post_comments` defaults `status` to `HELD` **at the database level**. That default is the real
+guarantee behind the spam filter: no code path, no bug and no hand-written INSERT can land a
+comment publicly without it having been scored. Its one index, `(postId, status, createdAt)`, is
+the only ASCENDING index in this schema — a conversation reads oldest-first while every log here
+reads newest-first, and the declared order should match the query rather than lean on a backward
+scan.
+
+There is **no email column**, by decision (2026-11-18): a comment is name-only, so there is nothing
+sensitive to store, leak, or honour a deletion request over. There is also no `userAgent` column,
+which was in the first draft and removed before it shipped — its only plausible reader was
+Akismet's submit-spam/submit-ham feedback, and that wants the raw IP invariant 6 forbids keeping,
+so the column would have collected PII-adjacent data for no reader at all.
+
+**Indexes deliberately absent:** nothing on `post_comments.status` alone — the moderation queue's
+`WHERE status = 'HELD'` is a deliberate sequential scan, the same call this document already makes
+for `inquiries.emailStatus`; nothing on `ipHash` in either table (write-only, as on `inquiries` —
+"how often has this IP commented" is `rate_windows`'s job, which counts *requests* rather than
+rows and so also sees the ones that produce no row); and no denormalised `likeCount`/`commentCount`
+on `posts`, for the same reason reading time is derived rather than stored — a counter drifts the
+moment a row is touched outside the app, bought with I/O this site does not notice.
+
+**Growth and retention.** Both tables grow with visitor activity rather than with content, which is
+new for this schema. `post_comments` is the second thing in Postgres whose loss destroys content
+after `posts` itself, so the backup drill tech debt 4.3 still records as never run matters more
+than it did. Neither table has a retention policy; a binned comment is kept on purpose, because a
+filter whose rejections are invisible cannot be tuned.
+
 `ARCHIVED` exists in the enum from the first migration even though Phase 0 ships no archive
 button, because adding a value to an existing Postgres enum is a migration of its own.
 

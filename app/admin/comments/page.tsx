@@ -1,208 +1,228 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { CommentStatus } from "@prisma/client";
 import { isAdmin } from "@/lib/auth";
-import { getArtworkIndex } from "@/lib/catalog";
-import { imageUrl } from "@/lib/cloudinary";
+import {
+  MODERATION_PAGE_SIZE,
+  countCommentsByStatus,
+  listCommentsForModeration,
+} from "@/lib/comments";
 import { content } from "@/lib/content";
-import { prisma } from "@/lib/db";
-import { artworkHref } from "@/lib/urls";
-import DeleteInquiryButton from "@/components/DeleteInquiryButton";
-import InquiryEmailAlert from "@/components/InquiryEmailAlert";
+import { postHref } from "@/lib/urls";
+import ConfirmSubmitButton from "@/components/ConfirmSubmitButton";
 import LocalTime from "@/components/LocalTime";
 import {
-  deleteInquiryAction,
-  resendInquiryEmailAction,
-  toggleReadAction,
+  approveCommentAction,
+  deleteCommentAction,
+  holdCommentAction,
+  markCommentSpamAction,
 } from "./actions";
 
+/**
+ * The comment moderation queue.
+ *
+ * This route used to be the private inquiry log, which moved to
+ * `/admin/inquiries` on 2026-11-18 — the name was always wrong there (it has
+ * never held a comment) and keeping both under "comments" would have meant two
+ * unrelated admin pages with the same name forever.
+ *
+ * Paginated and status-filtered from the first commit. The inquiry log shipped
+ * with a hard 200-row ceiling and had to be retrofitted (tech debt 2.7); the
+ * lesson was cheap to apply here.
+ */
+
 export const metadata: Metadata = {
-  title: `comment log - ${content.site.title}`,
+  title: `post comments - ${content.site.title}`,
   robots: { index: false },
 };
 
-// First dynamic page: it reads the session and the DB on every request. Declared
-// explicitly as documentation-of-intent (nothing here is cacheable).
+// Reads the session and the database on every request, and must show held and
+// binned comments. Nothing here is cacheable.
 export const dynamic = "force-dynamic";
 
-const PAGE_SIZE = 50;
-
 /**
- * Offset pagination, not keyset: this table holds sales leads, not a firehose —
- * even a busy year is a few thousand rows, so `skip`/`take` never has enough
- * rows ahead of it to make the extra offset scan cost anything measurable. In
- * exchange it gets arbitrary page numbers (jump to page 6, not just "next"),
- * which a `?page=` link needs to survive being pasted, refreshed, or bookmarked
- * across admin sessions — a cursor would have to be threaded through instead.
+ * The filter lives in the URL rather than in client state, so a view is
+ * bookmarkable and survives a refresh — the same reasoning the post list's
+ * `?status=` and the inquiry log's `?page=` record. An unrecognised value
+ * falls back to the held queue rather than erroring on a hand-edited URL.
  */
+const FILTERS = {
+  held: CommentStatus.HELD,
+  published: CommentStatus.PUBLISHED,
+  spam: CommentStatus.SPAM,
+  all: undefined,
+} as const;
+
+type FilterKey = keyof typeof FILTERS;
+
+function parseFilter(raw: string | undefined): FilterKey {
+  return raw && raw in FILTERS ? (raw as FilterKey) : "held";
+}
+
 function parsePage(raw: string | undefined): number {
   const n = Number(raw);
   return Number.isInteger(n) && n >= 1 ? n : 1;
 }
 
-export default async function CommentLogPage({
+export default async function PostCommentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ status?: string; page?: string }>;
 }) {
   if (!(await isAdmin())) redirect("/admin/login");
 
-  const { page: rawPage } = await searchParams;
-  const total = await prisma.inquiry.count();
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  // Garbage or out-of-range input (a stale bookmark after deletes shrink the
-  // table, a hand-edited URL) clamps back into range rather than rendering an
-  // empty page or erroring.
+  const { status: rawStatus, page: rawPage } = await searchParams;
+  const filter = parseFilter(rawStatus);
+  const status = FILTERS[filter];
+
+  const counts = await countCommentsByStatus();
+  const total =
+    status === undefined
+      ? counts.HELD + counts.PUBLISHED + counts.SPAM
+      : counts[status];
+  const pageCount = Math.max(1, Math.ceil(total / MODERATION_PAGE_SIZE));
+  // Clamped, so a hand-edited ?page=999 lands on the last page rather than on
+  // an empty one — the inquiry log's precedent.
   const page = Math.min(parsePage(rawPage), pageCount);
 
-  // The catalog only supplies a thumbnail + link (every inquiry already
-  // carries its own snapshotted artworkTitle) — a Cloudinary outage must not
-  // take the comment log down with it (tech debt 1.4). Run it alongside the
-  // DB query for latency, but `.catch` it separately: if it rejects, this
-  // page still renders from the database alone, just without thumbnails or
-  // deep links.
-  const [inquiries, indexResult] = await Promise.all([
-    prisma.inquiry.findMany({
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-    }),
-    getArtworkIndex().catch((err) => {
-      console.error("[admin/comments] catalog unavailable:", err);
-      return null;
-    }),
-  ]);
-  const catalogUnavailable = indexResult === null;
-  const index: Awaited<ReturnType<typeof getArtworkIndex>> =
-    indexResult ?? new Map();
+  const comments = await listCommentsForModeration(status, page);
+
+  const tabs: { key: FilterKey; label: string; count: number }[] = [
+    { key: "held", label: "held", count: counts.HELD },
+    { key: "published", label: "published", count: counts.PUBLISHED },
+    { key: "spam", label: "spam", count: counts.SPAM },
+    {
+      key: "all",
+      label: "all",
+      count: counts.HELD + counts.PUBLISHED + counts.SPAM,
+    },
+  ];
+
+  const action =
+    "rounded-[2px] border border-hairline px-2.5 py-1 text-[13px] text-ink-muted hover:text-steel";
 
   return (
     <div className="mx-auto max-w-[760px] px-5 py-8">
       <h1 className="font-pixel text-lg leading-relaxed text-ink">
-        comment log
+        post comments
       </h1>
       <p className="mt-1 text-[13px] text-ink-faint">
-        {total === 0
-          ? "No inquiries yet."
-          : `${total} inquir${total === 1 ? "y" : "ies"} · page ${page} of ${pageCount}`}
+        Everything arrives held until you approve it, or until you switch
+        auto-publish on in settings.
       </p>
-      {catalogUnavailable && (
-        <p className="mt-1 text-[13px] text-steel">
-          Catalog unavailable — showing titles and messages only, no
-          thumbnails or links.
-        </p>
-      )}
 
-      <ul className="mt-6 flex flex-col gap-3">
-        {inquiries.map((inquiry) => {
-          const ref = index.get(inquiry.artworkPublicId);
-          const isNew = inquiry.status === "NEW";
-          return (
+      <nav className="mt-6 flex gap-4 border-b border-hairline pb-2 text-[13px]">
+        {tabs.map((tab) => (
+          <Link
+            key={tab.key}
+            href={`/admin/comments?status=${tab.key}`}
+            className={
+              tab.key === filter ? "text-ink" : "text-ink-faint hover:text-steel"
+            }
+          >
+            {tab.label} ({tab.count})
+          </Link>
+        ))}
+      </nav>
+
+      {comments.length === 0 ? (
+        <p className="mt-6 text-[13px] text-ink-faint">
+          {filter === "held" ? "Nothing waiting." : `No ${filter} comments.`}
+        </p>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-2">
+          {comments.map((comment) => (
             <li
-              key={inquiry.id}
-              className={`rounded-[2px] border border-hairline bg-panel p-3 ${
-                isNew ? "" : "opacity-60"
-              }`}
+              key={comment.id}
+              className="rounded-[2px] border border-hairline bg-panel p-3"
             >
-              <div className="flex gap-3">
-                {/* No catalog → no Cloudinary thumbnail (the outage that took
-                    the catalog down almost certainly took image delivery down
-                    with it) — a plain placeholder box instead of a broken img. */}
-                {catalogUnavailable ? (
-                  <div className="h-16 w-24 shrink-0 rounded-[1px] bg-placeholder" />
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={imageUrl(inquiry.artworkPublicId, 200)}
-                    alt=""
-                    className="h-16 w-24 shrink-0 rounded-[1px] bg-placeholder object-cover"
-                  />
+              <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
+                <span className="font-pixel text-[10px] text-steel">
+                  {comment.status}
+                </span>
+                <span className="font-medium text-ink">
+                  {comment.authorName}
+                </span>
+                {comment.isOwner && (
+                  <span className="font-pixel text-[9px] text-steel">
+                    AUTHOR
+                  </span>
                 )}
-                <div className="min-w-0 grow">
-                  <div className="flex items-center gap-2">
-                    {isNew && (
-                      <span className="font-pixel text-[10px] text-steel">
-                        NEW
-                      </span>
-                    )}
-                    {ref ? (
-                      <Link
-                        href={artworkHref(
-                          ref.mediumSlug,
-                          ref.collectionSlug,
-                          ref.artwork.slug
-                        )}
-                        className="truncate text-[15px] font-medium text-ink hover:text-steel"
-                      >
-                        {ref.artwork.name}
-                      </Link>
-                    ) : (
-                      <span className="truncate text-[15px] font-medium text-ink">
-                        {inquiry.artworkTitle}{" "}
-                        {!catalogUnavailable && (
-                          <span className="text-ink-faint">
-                            (no longer listed)
-                          </span>
-                        )}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 text-[13px] text-ink-muted">
-                    {inquiry.name} ·{" "}
-                    <a
-                      href={`mailto:${inquiry.email}`}
-                      className="hover:text-steel"
-                    >
-                      {inquiry.email}
-                    </a>{" "}
-                    · <LocalTime date={inquiry.createdAt} />
-                  </div>
-                </div>
+                <span className="text-ink-faint">
+                  <LocalTime date={comment.createdAt} />
+                </span>
+                <span className="text-ink-faint">
+                  on{" "}
+                  <Link
+                    href={postHref(comment.post.slug)}
+                    className="hover:text-steel"
+                  >
+                    {comment.post.title}
+                  </Link>
+                </span>
               </div>
 
-              <p className="mt-2 whitespace-pre-wrap text-[15px] text-ink">
-                {inquiry.message}
+              {/* A React text node, so it is escaped. Never rendered through
+                  renderMarkdown and never linkified — invariant 13, and
+                  linkifying would actively reward link spam. */}
+              <p className="mt-1.5 whitespace-pre-wrap text-[15px] leading-relaxed text-ink">
+                {comment.body}
               </p>
 
-              <div className="mt-3 flex items-center gap-4 border-t border-hairline pt-2">
-                {inquiry.emailStatus !== "SENT" && (
-                  <InquiryEmailAlert
-                    inquiryId={inquiry.id}
-                    status={inquiry.emailStatus}
-                    error={inquiry.emailError}
-                    resendAction={resendInquiryEmailAction}
-                  />
+              {comment.spamReason && (
+                // Visible HERE and nowhere else: telling the commenter which
+                // rule they tripped tells a spammer how to route around it.
+                <p className="mt-1.5 text-[13px] text-ink-faint">
+                  held: {comment.spamReason}
+                </p>
+              )}
+
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {comment.status !== CommentStatus.PUBLISHED && (
+                  <form action={approveCommentAction}>
+                    <input type="hidden" name="id" value={comment.id} />
+                    <button type="submit" className={action}>
+                      approve
+                    </button>
+                  </form>
                 )}
-                <form action={toggleReadAction}>
-                  <input type="hidden" name="id" value={inquiry.id} />
-                  <input
-                    type="hidden"
-                    name="to"
-                    value={isNew ? "READ" : "NEW"}
+                {comment.status === CommentStatus.PUBLISHED && (
+                  <form action={holdCommentAction}>
+                    <input type="hidden" name="id" value={comment.id} />
+                    <button type="submit" className={action}>
+                      hold
+                    </button>
+                  </form>
+                )}
+                {comment.status !== CommentStatus.SPAM && (
+                  <form action={markCommentSpamAction}>
+                    <input type="hidden" name="id" value={comment.id} />
+                    <button type="submit" className={action}>
+                      spam
+                    </button>
+                  </form>
+                )}
+                <form action={deleteCommentAction} className="ml-auto">
+                  <input type="hidden" name="id" value={comment.id} />
+                  <ConfirmSubmitButton
+                    label="delete"
+                    confirm="Delete this comment? This can't be undone — use spam if you only want it hidden."
+                    className={action}
                   />
-                  <button
-                    type="submit"
-                    className="text-[13px] text-ink-faint hover:text-steel"
-                  >
-                    {isNew ? "mark read" : "mark unread"}
-                  </button>
-                </form>
-                <form action={deleteInquiryAction}>
-                  <input type="hidden" name="id" value={inquiry.id} />
-                  <DeleteInquiryButton />
                 </form>
               </div>
             </li>
-          );
-        })}
-      </ul>
+          ))}
+        </ul>
+      )}
 
       {pageCount > 1 && (
-        <div className="mt-6 flex items-center justify-between border-t border-hairline pt-3 text-[13px]">
+        <nav className="mt-6 flex items-center gap-4 text-[13px]">
           {page > 1 ? (
             <Link
-              href={`/admin/comments?page=${page - 1}`}
-              className="text-ink-faint hover:text-steel"
+              href={`/admin/comments?status=${filter}&page=${page - 1}`}
+              className="text-ink-muted hover:text-steel"
             >
               ← newer
             </Link>
@@ -214,15 +234,15 @@ export default async function CommentLogPage({
           </span>
           {page < pageCount ? (
             <Link
-              href={`/admin/comments?page=${page + 1}`}
-              className="text-ink-faint hover:text-steel"
+              href={`/admin/comments?status=${filter}&page=${page + 1}`}
+              className="text-ink-muted hover:text-steel"
             >
               older →
             </Link>
           ) : (
             <span className="text-ink-faint opacity-40">older →</span>
           )}
-        </div>
+        </nav>
       )}
     </div>
   );

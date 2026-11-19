@@ -5,6 +5,7 @@ import { content } from "@/lib/content";
 import { formatPostDate } from "@/lib/postDate";
 import { listPublishedPosts } from "@/lib/posts";
 import { postHref } from "@/lib/urls";
+import SubscribeForm from "@/components/SubscribeForm";
 
 /**
  * The blog index — every published post, newest first.
@@ -87,6 +88,8 @@ export default async function BlogIndex() {
                   {formatPostDate(post.publishedAt)}
                   {post.readingMinutes > 0 &&
                     ` · ${post.readingMinutes} min read`}
+                  {post.commentCount > 0 &&
+                    ` · ${post.commentCount} comment${post.commentCount === 1 ? "" : "s"}`}
                 </div>
                 <p className="mt-1.5 text-[15px] text-ink-muted">
                   {post.excerpt}
@@ -96,6 +99,8 @@ export default async function BlogIndex() {
           </li>
         ))}
       </ul>
+
+      <SubscribeForm />
     </div>
   );
 }

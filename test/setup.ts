@@ -24,6 +24,13 @@ const DANGEROUS_ENV_VARS = [
   "EVENT_COLLECTOR_URL",
   "EMBED_TOKEN",
   "CATALOG_INDEX_TOKEN",
+  // Akismet scores comments against a third party; a test must never reach it,
+  // and lib/akismet.ts treats an absent key as "hold everything", which is
+  // exactly the behaviour tests should see by default.
+  "AKISMET_API_KEY",
+  "SUBSCRIBE_TOKEN_SECRET",
+  "RESEND_SEGMENT_ID",
+  "BLOG_NOTIFY_FROM",
 ];
 
 for (const key of DANGEROUS_ENV_VARS) {

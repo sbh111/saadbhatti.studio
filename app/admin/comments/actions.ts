@@ -1,86 +1,77 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { EmailStatus, InquiryStatus } from "@prisma/client";
+import { CommentStatus } from "@prisma/client";
 import { isAdmin } from "@/lib/auth";
-import { getArtworkIndex } from "@/lib/catalog";
 import { prisma } from "@/lib/db";
-import { sendInquiryNotification } from "@/lib/mail";
+import { str } from "@/lib/http";
 
 /**
- * Single-row mutations for the admin comment log. Server Actions (not a route
- * handler) — these are form submissions on a server page, following the
- * loginAction precedent. The proxy gates the page, but each action re-checks
- * isAdmin() as the authoritative boundary.
+ * Moderation actions for visitor comments.
+ *
+ * Server Actions on a server page, following the `loginAction` and inquiry-log
+ * precedents. proxy.ts gates the page, but every action re-checks `isAdmin()`
+ * as the authoritative boundary (docs/architecture.md invariant 3).
+ *
+ * ── Note what is NOT here: any cache tag invalidation ─────────────────────
+ * `app/admin/blog/actions.ts` calls `updateTag(BLOG_CACHE_TAG)` on every post
+ * write, and its absence here will look like an omission to anyone who read
+ * that file first. It is not. Comments are fetched client-side and cached only
+ * at the CDN by the route's own headers (lib/comments.ts explains why), so
+ * they never enter the prerendered HTML that those tags invalidate. There is
+ * nothing to drop — only this admin page itself needs revalidating.
+ *
+ * Approving a comment therefore shows up to a visitor within the comment
+ * endpoint's fifteen-second shared-cache window, with no page regeneration.
  */
 
-export async function toggleReadAction(formData: FormData) {
+/**
+ * Every transition is one conditional-free UPDATE by id. No status guard,
+ * deliberately: all four transitions are legal from any state, and a stale
+ * form re-approving an already-approved comment is a no-op rather than a
+ * problem worth a round trip to find out about.
+ */
+async function setCommentStatus(
+  formData: FormData,
+  status: CommentStatus
+): Promise<void> {
   if (!(await isAdmin())) return;
-  const id = String(formData.get("id") ?? "");
+  const id = str(formData.get("id"));
   if (!id) return;
-  const status =
-    String(formData.get("to")) === "READ"
-      ? InquiryStatus.READ
-      : InquiryStatus.NEW;
-  await prisma.inquiry.update({ where: { id }, data: { status } });
+
+  await prisma.postComment.update({ where: { id }, data: { status } });
   revalidatePath("/admin/comments");
 }
 
-export async function deleteInquiryAction(formData: FormData) {
-  if (!(await isAdmin())) return;
-  const id = String(formData.get("id") ?? "");
-  if (!id) return;
-  await prisma.inquiry.delete({ where: { id } });
-  revalidatePath("/admin/comments");
+/** HELD or SPAM → PUBLISHED. The common case, and the reason this page exists. */
+export async function approveCommentAction(formData: FormData) {
+  return setCommentStatus(formData, CommentStatus.PUBLISHED);
+}
+
+/** PUBLISHED → HELD. Takes a comment off the post without judging it spam. */
+export async function holdCommentAction(formData: FormData) {
+  return setCommentStatus(formData, CommentStatus.HELD);
 }
 
 /**
- * Manually (re)send the notification email for an inquiry whose automatic send
- * was skipped (daily cap / unconfigured) or failed. A deliberate admin action,
- * so it is NOT subject to the daily email cap. The outcome is written back to the
- * row, so a repeat failure keeps the alert (with the fresh error) and a success
- * clears it. Artwork slugs come from the live catalog; if the artwork has since
- * been delisted the email still sends with the snapshotted title.
+ * → SPAM. Kept rather than deleted: a binned comment stays recoverable if the
+ * filter was wrong, and the row is what makes the filter tunable at all —
+ * the same reasoning behind `inquiries.emailStatus`.
  */
-export async function resendInquiryEmailAction(formData: FormData) {
-  if (!(await isAdmin())) return;
-  const id = String(formData.get("id") ?? "");
-  if (!id) return;
-  const inquiry = await prisma.inquiry.findUnique({ where: { id } });
-  if (!inquiry) return;
+export async function markCommentSpamAction(formData: FormData) {
+  return setCommentStatus(formData, CommentStatus.SPAM);
+}
 
-  const ref = (await getArtworkIndex()).get(inquiry.artworkPublicId);
-  try {
-    const dispatched = await sendInquiryNotification({
-      name: inquiry.name,
-      email: inquiry.email,
-      message: inquiry.message,
-      artworkTitle: inquiry.artworkTitle,
-      artworkPublicId: inquiry.artworkPublicId,
-      artworkSlug: ref?.artwork.slug ?? "",
-      mediumSlug: ref?.mediumSlug ?? "",
-      collectionSlug: ref?.collectionSlug ?? "",
-    });
-    await prisma.inquiry.update({
-      where: { id },
-      data: dispatched
-        ? { emailStatus: EmailStatus.SENT, emailError: null }
-        : {
-            emailStatus: EmailStatus.SKIPPED,
-            emailError: "Email notifications are not configured",
-          },
-    });
-  } catch (err) {
-    await prisma.inquiry.update({
-      where: { id },
-      data: {
-        emailStatus: EmailStatus.FAILED,
-        emailError: (err instanceof Error ? err.message : "Unknown send error").slice(
-          0,
-          500
-        ),
-      },
-    });
-  }
+/**
+ * Hard delete, behind a confirmation. The only irreversible action here, which
+ * is why SPAM exists as a separate state — binning is the reversible default
+ * and this is for genuine removal.
+ */
+export async function deleteCommentAction(formData: FormData) {
+  if (!(await isAdmin())) return;
+  const id = str(formData.get("id"));
+  if (!id) return;
+
+  await prisma.postComment.delete({ where: { id } });
   revalidatePath("/admin/comments");
 }

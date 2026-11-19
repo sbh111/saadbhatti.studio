@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function LikesPage() {
   if (!(await isAdmin())) redirect("/admin/login");
 
-  // Same reasoning as app/admin/comments/page.tsx: the catalog only supplies
+  // Same reasoning as app/admin/inquiries/page.tsx: the catalog only supplies
   // a thumbnail + link, so a Cloudinary outage must not take this page down
   // too (tech debt 1.4) — `.catch` it separately from the DB query.
   const [grouped, indexResult] = await Promise.all([

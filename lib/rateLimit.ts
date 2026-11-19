@@ -117,8 +117,66 @@ export const MIN_SCORE = 0.18;
 // each per-IP limit misses. Set far above real inquiry volume so it only ever
 // trips under attack; over the cap the inquiry is still stored, only the email is
 // skipped (and flagged in the comment log for manual resend).
-export const DAILY_EMAIL_CAP = 200;
+// 200 was ABOVE Resend's free-plan ceiling of 100 transactional emails per day
+// (verified 2026-11-18), so the cap could not do its job: under a flood,
+// roughly a hundred inquiries would have been stored with emailStatus = FAILED
+// and Resend's rejection text in emailError — the cap existing but never
+// biting, which is worse than no cap because it reads as protection.
+//
+// Now 60, leaving room for a SECOND transactional sender under the same 100:
+// subscriber confirmations (SUBSCRIBE_EMAIL_DAILY_CAP below). Two separate
+// buckets rather than one shared budget on purpose — a shared counter would be
+// compliant under any mix but would let a confirmation flood starve inquiry
+// notifications, and an inquiry is a lead.
+//
+//   60 inquiries + 30 confirmations = 90, with ~10 spare for the manual
+//   resends the inquiry log offers.
+export const DAILY_EMAIL_CAP = 60;
 export const DAY_MS = 24 * 60 * 60 * 1000;
+
+// ─── Blog engagement (Phase 2) ──────────────────────────────────────────────
+
+// Blog likes. Mirrors the artwork LIKE_MAX exactly — the same gesture, and a
+// shared POST+DELETE budget so a toggle-flood cannot get two budgets.
+export const BLOG_LIKE_MAX = 30;
+export const BLOG_LIKE_WINDOW_MS = 60_000;
+
+// The public engagement/comment READS. Present not because a read is expensive
+// but because the query string is part of the CDN cache key: `?slugs=a&_=rand`
+// busts it and turns every request into a Postgres query, which would make the
+// `s-maxage` on those routes advisory rather than protective.
+export const BLOG_READ_MAX = 120;
+export const BLOG_READ_WINDOW_MS = 60_000;
+
+// Site-wide ceiling on stored comments, keyed "__global__" rather than per-IP.
+// The per-IP limit (lib/commentLimits.ts) is the real first line of defence;
+// this bounds a distributed, IP-rotating flood that the per-IP limit cannot
+// see. Over the cap the route returns `busy()` and writes nothing — unlike the
+// email cap, where the row is kept and only the side effect is skipped.
+export const BLOG_COMMENT_GLOBAL_MAX = 200;
+export const BLOG_COMMENT_GLOBAL_WINDOW_MS = 60 * 60 * 1000;
+
+// ─── Subscriptions (Phase 3) ────────────────────────────────────────────────
+
+// Per-IP signup attempts. Deliberately tight: a confirmation email goes to an
+// address the submitter does not have to own, so this endpoint is an abuse
+// vector pointed at THIRD PARTIES, not just at this site. Three an hour is
+// generous for a human and useless for anyone mailbombing a stranger.
+export const SUBSCRIBE_MAX = 3;
+export const SUBSCRIBE_WINDOW_MS = 60 * 60 * 1000;
+
+// Site-wide daily ceiling on confirmation emails, keyed "__global__". Shares
+// Resend's free 100/day with DAILY_EMAIL_CAP above — see the arithmetic there.
+// Over the cap the row is still written and only the send is skipped, matching
+// how the inquiry cap behaves: a subscriber who never gets their confirmation
+// can retry after the cooldown.
+export const SUBSCRIBE_EMAIL_DAILY_CAP = 30;
+
+// How long a confirmation link stays valid, and how long before the same
+// address may request another. The cooldown is what stops the endpoint being
+// used to send someone the same mail repeatedly.
+export const SUBSCRIBE_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const SUBSCRIBE_RESEND_COOLDOWN_MS = 15 * 60 * 1000;
 
 // --- Stale-window sweep (tech debt 2.1) ----------------------------------
 //

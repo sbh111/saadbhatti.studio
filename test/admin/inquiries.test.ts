@@ -22,7 +22,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 const { default: CommentLogPage } = await import(
-  "@/app/admin/comments/page"
+  "@/app/admin/inquiries/page"
 );
 
 function searchParams(page?: string) {

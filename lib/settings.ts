@@ -13,6 +13,62 @@ import { prisma } from "./db";
 
 export const EVENT_STREAMING_KEY = "event_streaming_enabled";
 
+/**
+ * Master switch for accepting visitor comments. Off → the comment route
+ * rejects and the form is not rendered. Exists because "turn comments off"
+ * should not need a deploy, and because the generic `settings` table was built
+ * for exactly this ("future flags reuse it").
+ */
+export const COMMENTS_ENABLED_KEY = "blog_comments_enabled";
+
+/**
+ * Whether a clean Akismet verdict is allowed to publish a comment on its own.
+ *
+ * Starts OFF deliberately. Comments are name-only, which removes the most
+ * portable signal Akismet has (see lib/akismet.ts), so its confidence is
+ * reduced exactly where auto-publishing needs confidence. With this off every
+ * comment is HELD and the verdict is merely *recorded* in `spamReason` — so
+ * the owner can read a few weeks of real verdicts and decide whether they
+ * match their own judgement before trusting them. Cheaper and far more
+ * informative than trusting the filter on day one.
+ */
+export const COMMENT_AUTO_PUBLISH_KEY = "blog_comment_auto_publish";
+
+/**
+ * Master switch for emailing subscribers when a post is published.
+ *
+ * Publishing notifies automatically, which was chosen knowing the risk — so
+ * there has to be a way to stop it that does not involve a deploy. Turning
+ * this off before publishing is also the intended way to ship a typo fix, or
+ * to publish something subscribers should not be mailed about: the post still
+ * records SKIPPED, so the admin list shows that nobody was mailed and why.
+ *
+ * Defaults ON, because a subscriber who confirmed and then hears nothing is a
+ * worse failure than one email too many.
+ */
+export const NOTIFY_SUBSCRIBERS_KEY = "subscriber_notifications_enabled";
+
+/** A boolean setting, defaulting to `fallback` when unset or unreadable. */
+export async function getBooleanSetting(
+  key: string,
+  fallback: boolean
+): Promise<boolean> {
+  try {
+    const value = await getSetting(key);
+    if (value === null) return fallback;
+    return value === "true";
+  } catch (err) {
+    // Fail to the caller's stated default rather than throwing into a public
+    // write path — the same reasoning as isEventStreamingEnabled below, which
+    // fails closed on a DB hiccup.
+    console.warn(
+      `settings: read of "${key}" failed, defaulting to ${fallback}:`,
+      (err as Error).message
+    );
+    return fallback;
+  }
+}
+
 export async function getSetting(key: string): Promise<string | null> {
   const row = await prisma.setting.findUnique({ where: { key } });
   return row?.value ?? null;

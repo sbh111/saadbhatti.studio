@@ -70,6 +70,7 @@ describe("listPublishedPosts", () => {
         coverAlt: null,
         coverWidth: null,
         coverHeight: null,
+        _count: { comments: 0 },
       },
     ]);
     const { posts, degraded } = await listPublishedPosts();
@@ -88,6 +89,7 @@ describe("listPublishedPosts", () => {
         publishedAt: "2026-11-16T10:00:00.000Z",
         readingMinutes: 1,
         cover: null,
+        commentCount: 0,
       },
     ]);
   });
@@ -104,6 +106,7 @@ describe("listPublishedPosts", () => {
         coverAlt: "a lake at dusk",
         coverWidth: 3000,
         coverHeight: 2000,
+        _count: { comments: 0 },
       },
     ]);
     const { posts } = await listPublishedPosts();
@@ -130,6 +133,7 @@ describe("listPublishedPosts", () => {
         coverAlt: null,
         coverWidth: null,
         coverHeight: null,
+        _count: { comments: 0 },
       },
     ]);
     const { posts } = await listPublishedPosts();
@@ -231,6 +235,7 @@ describe("getPublishedPost", () => {
       publishedAt: "2026-11-16T10:00:00.000Z",
       readingMinutes: 1,
       cover: null,
+      commentCount: 0,
     });
   });
 
@@ -260,6 +265,7 @@ describe("getPublishedPost", () => {
         coverAlt: null,
         coverWidth: null,
         coverHeight: null,
+        _count: { comments: 0 },
       },
     ]);
     const post = await getPublishedPost("a");
@@ -318,5 +324,35 @@ describe("countPostsByStatus", () => {
       PUBLISHED: 0,
       ARCHIVED: 0,
     });
+  });
+});
+
+describe("comment counts on the index", () => {
+  it("surfaces only PUBLISHED comments in the count", async () => {
+    // The filter lives in the query, so a held or binned comment can never
+    // reach a number a visitor sees.
+    findMany.mockResolvedValue([]);
+    await listPublishedPosts();
+    const select = findMany.mock.calls[0][0].select;
+    expect(select._count.select.comments.where).toEqual({ status: "PUBLISHED" });
+  });
+
+  it("passes the count through to the card", async () => {
+    findMany.mockResolvedValue([
+      {
+        slug: "a",
+        title: "A",
+        excerpt: "x",
+        body: "hi",
+        publishedAt: new Date("2026-11-16T10:00:00.000Z"),
+        coverPublicId: null,
+        coverAlt: null,
+        coverWidth: null,
+        coverHeight: null,
+        _count: { comments: 4 },
+      },
+    ]);
+    const { posts } = await listPublishedPosts();
+    expect(posts[0].commentCount).toBe(4);
   });
 });

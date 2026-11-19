@@ -577,9 +577,25 @@ Missing-credential errors are raised deliberately with instructions
       returning nothing is what keeps the database out of the build). A static
       route achieves it by catching the failure and degrading
       (`listPublishedPosts`).
-   c. Per-visitor data never enters the render. Phase 0 has none; when likes
-      and comment counts arrive they are fetched client-side from
-      `/api/blog/*`, the way `AdminProvider` fetches `/api/admin/session`.
+   c. Per-visitor data never enters the render. Likes and comments satisfy
+      this by being fetched client-side from `/api/blog/*`, the way
+      `AdminProvider` fetches `/api/admin/session`.
+
+      Worth knowing *why* that is also the mechanically right answer, not
+      merely the compliant one. A cached server read would have been legal
+      under (a) and (b) — but refreshing a count after a like would then need
+      `revalidateTag`, which means **one visitor's click restages the HTML of
+      `/blog` and every post page**: a publicly reachable
+      one-request-to-N-regenerations amplifier, behind a rate limiter that
+      fails open. And the obvious mitigation, a shorter revalidate on the
+      count read, is forbidden by the clamping note in `lib/constants.ts`.
+
+      So counts live in `/api/blog/engagement`, cached at the CDN by that
+      route's own `Cache-Control` and never in Next's data cache. That is only
+      possible because the response carries **no** per-visitor data: whether
+      *you* liked something stays in `localStorage`, exactly as
+      `components/LikeButton.tsx` has always done it. Returning it would be
+      more honest across devices and would make every request a cache miss.
 
    The build must stay database-independent. `.github/workflows/ci.yml` points
    `DATABASE_URL` at an unreachable placeholder specifically to keep this
@@ -667,6 +683,40 @@ Missing-credential errors are raised deliberately with instructions
     "every post folder belongs to a real post" true, and is where the slug in
     the folder name comes from (never the request body, which would let a
     caller name the signed folder).
+16. **No comment path ever calls `updateTag` or `revalidateTag`.** Visitor
+    comments are fetched client-side and cached only at the CDN
+    (`lib/comments.ts`), so nothing a visitor writes enters prerendered HTML
+    and there is nothing to invalidate. Its absence will read as an omission to
+    anyone who met `revalidateBlog` in `app/admin/blog/actions.ts` first — it
+    is not. Adding one would reintroduce the amplifier invariant 2(c)
+    describes, and from a route handler `updateTag` throws outright (it is
+    Server-Action-only). The admin moderation actions revalidate their own page
+    and nothing else.
+17. **A comment body renders as an escaped React text node.** Never through
+    `renderMarkdown`, never through `dangerouslySetInnerHTML` (invariant 13
+    already says so), and **never auto-linkified** — which would both widen the
+    surface invariant 13 protects and actively reward link spam. The same rule
+    applies in the moderation queue, where a held comment's `spamReason` is
+    visible to the owner and to nobody else: telling a commenter which rule
+    they tripped tells a spammer how to route around it.
+18. **A post notifies subscribers at most once, ever.** The guard is a
+    CONDITIONAL update — `updateMany({ where: { notifyStatus: NOT_SENT } })`
+    checked for `count === 1` — never a read-then-write, because two
+    concurrent publishes would both read NOT_SENT and both proceed. Unpublish,
+    archive and restore deliberately do NOT reset it, so a re-publish finds the
+    send already claimed. `notifyStatus` rather than a bare `notifiedAt`
+    because a timestamp alone makes the one-shot silent: a transient Resend 500
+    would set it, fail, and mute that post forever with nothing recording why.
+    Verified against Postgres, concurrency included, not just unit-tested.
+19. **`/api/blog/subscribe` answers an identical 200 on every branch.** New,
+    pending, within cooldown, already confirmed, resubscribing, honeypot
+    tripped, and database down all return `{ok:true}` byte for byte, and the
+    send happens in `after()` so response timing does not vary either.
+    Anything that distinguishes them — a 201 for new addresses, a 409 for
+    known ones, an "already subscribed" message — makes the endpoint an
+    **email-existence oracle**, a way for anyone to test whether a given
+    person subscribes. The signup form preserves this: one success state, and
+    it treats a failed request as success too.
 
 ---
 

@@ -135,8 +135,22 @@ async function main() {
   console.log("");
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await rl.question(`  Type the host to continue (${target.host}): `);
-  rl.close();
+  let answer;
+  try {
+    answer = await rl.question(`  Type the host to continue (${target.host}): `);
+  } catch (err) {
+    // readline rejects with ABORT_ERR when the prompt is interrupted. Backing
+    // out here is a perfectly reasonable thing to do — arguably the thing this
+    // prompt exists to make easy — so it should read as a decision rather than
+    // dumping a Node stack trace, which is what it used to do.
+    if (err && err.code === "ABORT_ERR") {
+      console.error("\n  with-neon-db: cancelled — nothing was run.\n");
+      process.exit(130); // conventional exit status for an interrupt
+    }
+    throw err;
+  } finally {
+    rl.close();
+  }
 
   if (answer.trim() !== target.host) {
     fail("host did not match — nothing was run.");
